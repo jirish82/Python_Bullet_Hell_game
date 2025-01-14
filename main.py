@@ -260,46 +260,43 @@ class Game(ShowBase):
                 projectile.removeNode()
                 self.projectiles.remove(projectile)
 
-        # Update enemies
-        for enemy in self.enemies[:]:  # Use slice copy to safely modify list while iterating
-            # Get current positions
-            enemy_pos = enemy.getPos()
-            player_pos = (self.player_pos[0], self.player_pos[1])  # x, y
-            
-            # Calculate direction to player
-            dx = player_pos[0] - enemy_pos[0]
-            dy = player_pos[1] - enemy_pos[2]  # Note: z coordinate is y in 2D
-            
-            # Normalize direction
-            distance = math.sqrt(dx * dx + dy * dy)
-            if distance > 0:  # Avoid division by zero
-                dx /= distance
-                dy /= distance
-            
-            # Move enemy towards player
-            new_x = enemy_pos[0] + dx * self.enemy_speed
-            new_y = enemy_pos[2] + dy * self.enemy_speed
-            
-            # Keep enemy within screen bounds
-            new_x = max(min(new_x, self.aspect_ratio - 0.05), -self.aspect_ratio + 0.05)
-            new_y = max(min(new_y, 0.95), -0.95)
-            
-            enemy.setPos(new_x, 0, new_y)
-            
-            # Check for collisions with projectiles
-            for projectile in self.projectiles[:]:
-                proj_pos = projectile.getPos()
-                # Simple collision detection using distance
-                if (abs(proj_pos[0] - new_x) < 0.07 and 
-                    abs(proj_pos[2] - new_y) < 0.07):  # Adjust collision threshold as needed
-                    # Remove both enemy and projectile
-                    enemy.removeNode()
-                    projectile.removeNode()
-                    self.enemies.remove(enemy)
-                    self.projectiles.remove(projectile)
-                    # Spawn new enemy to maintain count
-                    self.spawn_single_enemy()
-                    break
+            # Update enemies
+            for enemy in self.enemies[:]:
+                enemy_pos = enemy.getPos()
+                player_pos = (self.player_pos[0], self.player_pos[1])
+                
+                dx = player_pos[0] - enemy_pos[0]
+                dy = player_pos[1] - enemy_pos[2]
+                
+                distance = math.sqrt(dx * dx + dy * dy)
+                if distance > 0:
+                    dx /= distance
+                    dy /= distance
+                
+                # Use enemy's specific speed
+                enemy_speed = self.enemy_data[enemy]
+                new_x = enemy_pos[0] + dx * enemy_speed
+                new_y = enemy_pos[2] + dy * enemy_speed
+                
+                # Keep enemy within screen bounds
+                new_x = max(min(new_x, self.aspect_ratio - 0.05), -self.aspect_ratio + 0.05)
+                new_y = max(min(new_y, 0.95), -0.95)
+                
+                enemy.setPos(new_x, 0, new_y)
+                
+                # Check for collisions with projectiles
+                for projectile in self.projectiles[:]:
+                    proj_pos = projectile.getPos()
+                    if (abs(proj_pos[0] - new_x) < 0.07 and 
+                        abs(proj_pos[2] - new_y) < 0.07):
+                        # Remove enemy data before removing enemy
+                        self.enemy_data.pop(enemy)
+                        enemy.removeNode()
+                        projectile.removeNode()
+                        self.enemies.remove(enemy)
+                        self.projectiles.remove(projectile)
+                        self.spawn_single_enemy()
+                        break
             
             # Check for collision with player (game over condition)
             if (abs(player_pos[0] - new_x) < 0.07 and 
@@ -348,6 +345,9 @@ class Game(ShowBase):
             y = random.uniform(-1 + enemy_size, 1 - enemy_size)
             enemy.setPos(x, 0, y)
             
+            # Assign random speed between 30% and 100% of max speed
+            self.enemy_data[enemy] = random.uniform(0.3 * self.max_enemy_speed, self.max_enemy_speed)
+            
             # Add to enemies list
             self.enemies.append(enemy)
 
@@ -381,6 +381,9 @@ class Game(ShowBase):
         
         # Set position
         enemy.setPos(x, 0, y)
+        
+        # Assign random speed between 30% and 100% of max speed
+        self.enemy_data[enemy] = random.uniform(0.3 * self.max_enemy_speed, self.max_enemy_speed)
         
         # Add to enemies list
         self.enemies.append(enemy)
