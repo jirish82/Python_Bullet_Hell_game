@@ -292,13 +292,18 @@ class Game(ShowBase):
                 abs(self.player_pos[1] - new_y) < 0.07):
                 print("Game Over!")
         
-        # Check for projectile-enemy collisions (separate loop)
+        # Check for projectile-enemy collisions
         for projectile in self.projectiles[:]:
             proj_pos = projectile.getPos()
             for enemy in self.enemies[:]:
                 enemy_pos = enemy.getPos()
                 if (abs(proj_pos[0] - enemy_pos[0]) < 0.07 and 
                     abs(proj_pos[2] - enemy_pos[2]) < 0.07):
+                    # Create explosion before removing enemy
+                    self.create_explosion(enemy_pos[0], enemy_pos[2])
+                    print("Hit detected!")  # Debug print
+                    
+                    # Remove enemy and projectile
                     self.enemy_data.pop(enemy)
                     enemy.removeNode()
                     projectile.removeNode()
@@ -306,6 +311,9 @@ class Game(ShowBase):
                     self.projectiles.remove(projectile)
                     self.spawn_single_enemy()
                     break
+        
+        # Update explosions
+        self.update_explosions(task)
         
         return Task.cont
 
@@ -391,6 +399,62 @@ class Game(ShowBase):
         
         # Add to enemies list
         self.enemies.append(enemy)
+
+    def create_explosion(self, pos_x, pos_y):
+        # Create explosion sprite
+        cm = CardMaker("explosion")
+        explosion_size = 0.1
+        cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
+        explosion = self.render2d.attachNewNode(cm.generate())
+        
+        # Make sure explosion renders on top
+        explosion.setBin('fixed', 100)  # Added this line
+        explosion.setDepthTest(False)   # Added this line
+        explosion.setDepthWrite(False)  # Added this line
+        
+        # Make it a solid color (try a different color)
+        explosion.setColorScale(1, 0.5, 0, 1)  # Bright orange
+        
+        # Position at the enemy's location
+        explosion.setPos(pos_x, 0, pos_y)
+        
+        # Store the creation time and initial position
+        self.explosion_data[explosion] = {
+            'start_time': globalClock.getFrameTime(),
+            'pos_x': pos_x,
+            'pos_y': pos_y
+        }
+        
+        self.explosions.append(explosion)
+        print(f"Explosion created at {pos_x}, {pos_y}")
+
+    def update_explosions(self, task):
+        current_time = globalClock.getFrameTime()
+        
+        for explosion in self.explosions[:]:
+            if explosion not in self.explosion_data:
+                continue
+                
+            start_time = self.explosion_data[explosion]['start_time']
+            age = current_time - start_time
+            
+            if age > self.explosion_duration:
+                explosion.removeNode()
+                self.explosions.remove(explosion)
+                self.explosion_data.pop(explosion)
+                print("Explosion removed")
+                continue
+            
+            # Calculate progress (0 to 1)
+            progress = age / self.explosion_duration
+            
+            # Make the explosion larger and last longer
+            current_size = 0.1 + (0.4 * progress)  # Increased maximum size
+            explosion.setScale(current_size)
+            
+            # Keep full opacity longer, then fade quickly
+            alpha = 1.0 if progress < 0.7 else (1.0 - ((progress - 0.7) / 0.3))
+            explosion.setColorScale(1, 0.5, 0, alpha)  # Bright orange fade
 
 game = Game()
 game.run()
