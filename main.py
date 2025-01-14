@@ -5,6 +5,7 @@ from panda3d.core import WindowProperties
 from panda3d.core import loadPrcFileData
 from panda3d.core import InputDevice
 import math
+import random
 
 # Add audio configuration
 loadPrcFileData('', 'audio-library-name p3openal_audio')
@@ -15,12 +16,25 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+
+        # Initialize enemies list
+        self.enemies = []
+        self.enemy_speed = 0.01
+        self.num_enemies = 10
+        
+        # Create initial enemies
+        self.spawn_enemies()    
+
         # Initialize projectiles list
         self.projectiles = []
         self.projectile_speed = 0.03
         
         # Initialize trigger state
         self.last_trigger_state = 0
+
+        # Add fire rate control
+        self.last_fire_time = 0
+        self.fire_rate = 0.1  # Time in seconds between shots (adjust this to control fire rate)
 
         # Initialize gamepad
         self.gamepad = None
@@ -202,24 +216,25 @@ class Game(ShowBase):
             right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
             right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
             
-            # Get trigger value (try both possible trigger axes)
-            trigger_value = max(
-                self.gamepad.findAxis(InputDevice.Axis.right_trigger).value,
-                self.gamepad.findAxis(InputDevice.Axis.right_y).value
-            )
+            # Get trigger value
+            trigger_value = self.gamepad.findAxis(InputDevice.Axis.right_trigger).value
             
             # Calculate stick distance from center (magnitude)
             stick_magnitude = math.sqrt(right_x * right_x + right_y * right_y)
             
-            # Only fire if stick is pushed AND trigger is pressed AND wasn't pressed last frame
+            # Get current time
+            current_time = task.time
+            
+            # Fire if stick is pushed AND trigger is pressed AND enough time has passed since last shot
             deadzone = 0.2
-            if stick_magnitude > deadzone and trigger_value > 0.5 and self.last_trigger_state <= 0.5:
+            if (stick_magnitude > deadzone and 
+                trigger_value > 0.5 and 
+                current_time - self.last_fire_time >= self.fire_rate):
                 # Normalize the direction vector
                 direction_x = right_x / stick_magnitude
                 direction_y = right_y / stick_magnitude
                 self.createProjectile(direction_x, direction_y)
-            
-            self.last_trigger_state = trigger_value
+                self.last_fire_time = current_time
 
         # Update projectiles
         for projectile in self.projectiles[:]:
@@ -261,6 +276,28 @@ class Game(ShowBase):
         
         # Add to projectiles list
         self.projectiles.append(projectile)
+
+    def spawn_enemies(self):
+        # Create enemies
+        for _ in range(self.num_enemies):
+            # Create enemy sprite
+            cm = CardMaker("enemy")
+            enemy_size = 0.05  # Adjust size as needed
+            cm.setFrame(-enemy_size, enemy_size, -enemy_size, enemy_size)
+            enemy = self.render2d.attachNewNode(cm.generate())
+            
+            # Load and apply enemy texture
+            enemy_tex = self.loader.loadTexture("enemy.png")
+            enemy.setTexture(enemy_tex)
+            enemy.setTransparency(TransparencyAttrib.MAlpha)
+            
+            # Random position (keeping within screen bounds)
+            x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
+            y = random.uniform(-1 + enemy_size, 1 - enemy_size)
+            enemy.setPos(x, 0, y)
+            
+            # Add to enemies list
+            self.enemies.append(enemy)
 
 game = Game()
 game.run()
