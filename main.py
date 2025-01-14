@@ -1,4 +1,5 @@
 from direct.showbase.ShowBase import ShowBase
+from direct.gui.OnscreenText import OnscreenText
 from direct.task import Task
 from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture
 from panda3d.core import WindowProperties
@@ -16,6 +17,32 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.paused = True
+    
+        # Clear any existing bindings
+        self.ignore_all()
+        
+        # Set up our pause controls
+        self.accept("start", self.custom_toggle_pause)
+        self.accept("gamepad-start", self.custom_toggle_pause)  # Try alternative name
+        self.accept("p", self.custom_toggle_pause)
+        
+        # Debug print for all inputs
+        def print_button(button):
+            print(f"Button pressed: {button}")
+        self.accept("*", print_button)
+
+        self.pause_text = OnscreenText(
+            text="PAUSED",
+            pos=(0, 0),
+            scale=0.1,
+            fg=(1, 1, 1, 1),
+            shadow=(0, 0, 0, 1)
+        )
+        if self.paused:
+            self.pause_text.show()
+        else:
+            self.pause_text.hide()
 
         # Calculate and store aspect ratio
         props = self.win.getProperties()
@@ -171,6 +198,11 @@ class Game(ShowBase):
         self.keys[key] = value
         
     def update(self, task):
+
+        # At the start of your update method
+        if self.paused:
+            return task.cont
+
         # Handle keyboard input
         dx = 0
         dy = 0
@@ -401,9 +433,9 @@ class Game(ShowBase):
         self.enemies.append(enemy)
 
     def create_explosion(self, pos_x, pos_y):
-        # Create explosion sprite
+        # Increase initial size
+        explosion_size = 0.2  # Increased from 0.1
         cm = CardMaker("explosion")
-        explosion_size = 0.1
         cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
         explosion = self.render2d.attachNewNode(cm.generate())
         
@@ -476,6 +508,11 @@ class Game(ShowBase):
         self.explosions.append(explosion)
 
     def update_explosions(self, task):
+
+        # At the start of your update method
+        if self.paused:
+            return task.cont
+        
         current_time = globalClock.getFrameTime()
         
         for explosion in self.explosions[:]:
@@ -492,12 +529,11 @@ class Game(ShowBase):
                 self.explosion_data.pop(explosion)
                 continue
             
-            # Calculate progress (0 to 1)
             progress = age / self.explosion_duration
             
-            # Non-linear scaling for more dynamic effect
+            # Increase the scale range
             scale_factor = math.sin(progress * math.pi) * 0.5 + 0.5
-            current_size = 0.1 + (0.3 * scale_factor)
+            current_size = 0.3 + (0.6 * scale_factor)  # Increased from 0.1 + (0.3 * scale_factor)
             explosion.setScale(current_size)
             
             # Update rotation
@@ -518,6 +554,24 @@ class Game(ShowBase):
             explosion.setColorScale(1, 1, 1, intensity)
         
         return task.cont
+
+    def toggle_pause(self):
+        print("Toggle pause called")  # Debug print
+        self.paused = not self.paused
+        if self.paused:
+            self.pause_text.show()
+        else:
+            self.pause_text.hide()
+
+    def custom_toggle_pause(self):
+        print("Custom toggle pause called")  # Debug print
+        self.paused = not self.paused
+        print(f"Paused state: {self.paused}")  # Debug print
+        
+        if self.paused:
+            self.pause_text.show()
+        else:
+            self.pause_text.hide()
 
 game = Game()
 game.run()
