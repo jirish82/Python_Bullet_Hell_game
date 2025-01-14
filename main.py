@@ -17,10 +17,16 @@ class Game(ShowBase):
         ShowBase.__init__(self)
 
 
-        # Initialize enemies list
+        # Calculate and store aspect ratio
+        props = self.win.getProperties()
+        self.aspect_ratio = props.getXSize() / props.getYSize()
+
         self.enemies = []
-        self.enemy_speed = 0.01
+        self.max_enemy_speed = 0.01  # This is now the maximum speed
         self.num_enemies = 10
+        
+        # Dictionary to store enemy data
+        self.enemy_data = {}  # Will store speeds keyed by enemy node
         
         # Create initial enemies
         self.spawn_enemies()    
@@ -253,6 +259,52 @@ class Game(ShowBase):
                 new_z < -1.1):
                 projectile.removeNode()
                 self.projectiles.remove(projectile)
+
+        # Update enemies
+        for enemy in self.enemies[:]:  # Use slice copy to safely modify list while iterating
+            # Get current positions
+            enemy_pos = enemy.getPos()
+            player_pos = (self.player_pos[0], self.player_pos[1])  # x, y
+            
+            # Calculate direction to player
+            dx = player_pos[0] - enemy_pos[0]
+            dy = player_pos[1] - enemy_pos[2]  # Note: z coordinate is y in 2D
+            
+            # Normalize direction
+            distance = math.sqrt(dx * dx + dy * dy)
+            if distance > 0:  # Avoid division by zero
+                dx /= distance
+                dy /= distance
+            
+            # Move enemy towards player
+            new_x = enemy_pos[0] + dx * self.enemy_speed
+            new_y = enemy_pos[2] + dy * self.enemy_speed
+            
+            # Keep enemy within screen bounds
+            new_x = max(min(new_x, self.aspect_ratio - 0.05), -self.aspect_ratio + 0.05)
+            new_y = max(min(new_y, 0.95), -0.95)
+            
+            enemy.setPos(new_x, 0, new_y)
+            
+            # Check for collisions with projectiles
+            for projectile in self.projectiles[:]:
+                proj_pos = projectile.getPos()
+                # Simple collision detection using distance
+                if (abs(proj_pos[0] - new_x) < 0.07 and 
+                    abs(proj_pos[2] - new_y) < 0.07):  # Adjust collision threshold as needed
+                    # Remove both enemy and projectile
+                    enemy.removeNode()
+                    projectile.removeNode()
+                    self.enemies.remove(enemy)
+                    self.projectiles.remove(projectile)
+                    # Spawn new enemy to maintain count
+                    self.spawn_single_enemy()
+                    break
+            
+            # Check for collision with player (game over condition)
+            if (abs(player_pos[0] - new_x) < 0.07 and 
+                abs(player_pos[1] - new_y) < 0.07):
+                print("Game Over!")  # You might want to add proper game over handling
             
         return Task.cont
 
@@ -298,6 +350,40 @@ class Game(ShowBase):
             
             # Add to enemies list
             self.enemies.append(enemy)
+
+    def spawn_single_enemy(self):
+        # Choose a random edge of the screen to spawn from
+        side = random.choice(['top', 'bottom', 'left', 'right'])
+        enemy_size = 0.05
+        
+        if side == 'top':
+            x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
+            y = 1 - enemy_size
+        elif side == 'bottom':
+            x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
+            y = -1 + enemy_size
+        elif side == 'left':
+            x = -self.aspect_ratio + enemy_size
+            y = random.uniform(-1 + enemy_size, 1 - enemy_size)
+        else:  # right
+            x = self.aspect_ratio - enemy_size
+            y = random.uniform(-1 + enemy_size, 1 - enemy_size)
+        
+        # Create enemy sprite
+        cm = CardMaker("enemy")
+        cm.setFrame(-enemy_size, enemy_size, -enemy_size, enemy_size)
+        enemy = self.render2d.attachNewNode(cm.generate())
+        
+        # Load and apply enemy texture
+        enemy_tex = self.loader.loadTexture("enemy.png")
+        enemy.setTexture(enemy_tex)
+        enemy.setTransparency(TransparencyAttrib.MAlpha)
+        
+        # Set position
+        enemy.setPos(x, 0, y)
+        
+        # Add to enemies list
+        self.enemies.append(enemy)
 
 game = Game()
 game.run()
