@@ -196,37 +196,52 @@ class Game(ShowBase):
 
 
 
-        # Handle projectile firing with right trigger
+        # Handle projectile firing with right analog stick + trigger
         if self.gamepad:
-            # Try both possible trigger axes
+            # Get right stick values
+            right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
+            right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
+            
+            # Get trigger value (try both possible trigger axes)
             trigger_value = max(
                 self.gamepad.findAxis(InputDevice.Axis.right_trigger).value,
-                self.gamepad.findAxis(InputDevice.Axis.right_y).value  # Some controllers use right_y for trigger
+                self.gamepad.findAxis(InputDevice.Axis.right_y).value
             )
             
-            # Debug print to see trigger values
-            # print(f"Trigger value: {trigger_value}")
+            # Calculate stick distance from center (magnitude)
+            stick_magnitude = math.sqrt(right_x * right_x + right_y * right_y)
             
-            # Trigger pressed (checking for positive movement)
-            if trigger_value > 0.5 and self.last_trigger_state <= 0.5:  # Adjusted threshold
-                self.createProjectile()
+            # Only fire if stick is pushed AND trigger is pressed AND wasn't pressed last frame
+            deadzone = 0.2
+            if stick_magnitude > deadzone and trigger_value > 0.5 and self.last_trigger_state <= 0.5:
+                # Normalize the direction vector
+                direction_x = right_x / stick_magnitude
+                direction_y = right_y / stick_magnitude
+                self.createProjectile(direction_x, direction_y)
             
             self.last_trigger_state = trigger_value
 
         # Update projectiles
         for projectile in self.projectiles[:]:
             current_pos = projectile.getPos()
-            new_x = current_pos[0] + self.projectile_speed
-            projectile.setPos(new_x, 0, current_pos[2])
+            # Get the projectile's direction from its Python tag
+            direction = projectile.getPythonTag("direction")
+            # Move projectile in its stored direction
+            new_x = current_pos[0] + direction[0] * self.projectile_speed
+            new_z = current_pos[2] + direction[1] * self.projectile_speed
+            projectile.setPos(new_x, 0, new_z)
             
-            # Remove if off screen
-            if new_x > self.aspect_ratio + 0.1:
+            # Remove if off screen (check all edges)
+            if (new_x > self.aspect_ratio + 0.1 or 
+                new_x < -self.aspect_ratio - 0.1 or 
+                new_z > 1.1 or 
+                new_z < -1.1):
                 projectile.removeNode()
                 self.projectiles.remove(projectile)
             
         return Task.cont
 
-    def createProjectile(self):
+    def createProjectile(self, direction_x, direction_y):
         # Create a projectile using the orb image
         cm = CardMaker("projectile")
         projectile_size = 0.02
@@ -236,12 +251,13 @@ class Game(ShowBase):
         # Load and apply the orb texture
         projectile_tex = self.loader.loadTexture("orb.png")
         projectile.setTexture(projectile_tex)
-        projectile.setTransparency(TransparencyAttrib.MAlpha)  # Enable transparency for PNG
+        projectile.setTransparency(TransparencyAttrib.MAlpha)
         
         # Position it at the player's location
         projectile.setPos(self.player_pos[0], 0, self.player_pos[1])
         
-        print("Projectile created!")  # Debug message
+        # Store the direction in the projectile node
+        projectile.setPythonTag("direction", (direction_x, direction_y))
         
         # Add to projectiles list
         self.projectiles.append(projectile)
