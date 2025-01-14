@@ -1,0 +1,51 @@
+# Environment and IDE
+.env
+.vscode/
+.idea/
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.env/
+.venv/
+
+# Panda3D specific
+*.bam
+*.egg-log
+*.log
+*.flt
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Temporary files
+*.swp
+*.swo
+*~
+
+# Debug files
+*.debug
+*.pdb
+
+# Local development settings
+local_settings.py
+
+# Database
+*.db
+*.sqlite3
+launch.json
