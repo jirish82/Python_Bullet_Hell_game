@@ -1,6 +1,6 @@
 from direct.showbase.ShowBase import ShowBase
 from direct.task import Task
-from panda3d.core import TextureStage, TransparencyAttrib, CardMaker
+from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture
 from panda3d.core import WindowProperties
 from panda3d.core import loadPrcFileData
 from panda3d.core import InputDevice
@@ -407,26 +407,73 @@ class Game(ShowBase):
         cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
         explosion = self.render2d.attachNewNode(cm.generate())
         
-        # Make sure explosion renders on top
-        explosion.setBin('fixed', 100)  # Added this line
-        explosion.setDepthTest(False)   # Added this line
-        explosion.setDepthWrite(False)  # Added this line
+        # Create a circular gradient texture with a softer edge
+        texture_size = 128
+        image = PNMImage(texture_size, texture_size, 4)  # 4 channels (RGBA)
+        center_x = texture_size // 2
+        center_y = texture_size // 2
+        radius = texture_size // 2
         
-        # Make it a solid color (try a different color)
-        explosion.setColorScale(1, 0.5, 0, 1)  # Bright orange
+        # Initialize the image to transparent black
+        image.fill(0, 0, 0)
+        image.alphaFill(0)
         
-        # Position at the enemy's location
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                if distance <= radius:
+                    # Create a more interesting gradient
+                    intensity = 1.0 - (distance / radius)
+                    # Add some noise to make it look more explosive
+                    noise = random.uniform(0.8, 1.0)
+                    intensity = intensity * noise
+                    
+                    # Inner bright core
+                    if distance < radius * 0.3:
+                        image.setXel(x, y, 1.0, 1.0, 0.7)  # Bright yellow-white
+                    # Middle region
+                    elif distance < radius * 0.6:
+                        image.setXel(x, y, 1.0, 0.5, 0.0)  # Orange
+                    # Outer region
+                    else:
+                        image.setXel(x, y, 1.0, 0.2, 0.0)  # Red-orange
+                    
+                    # Smooth falloff at the edges
+                    edge_softness = 1.0
+                    if distance > radius * 0.7:
+                        edge_factor = 1.0 - ((distance - radius * 0.7) / (radius * 0.3))
+                        intensity *= edge_factor
+                    
+                    image.setAlpha(x, y, intensity)
+        
+        texture = Texture()
+        texture.load(image)
+        explosion.setTexture(texture)
+        
+        # Set rendering properties
+        explosion.setBin('fixed', 100)
+        explosion.setDepthTest(False)
+        explosion.setDepthWrite(False)
+        explosion.setTransparency(TransparencyAttrib.MAlpha)
+        
         explosion.setPos(pos_x, 0, pos_y)
         
-        # Store the creation time and initial position
+        # Add some random rotation
+        initial_rotation = random.uniform(0, 360)
+        explosion.setR(initial_rotation)
+        
+        # Store additional animation parameters
         self.explosion_data[explosion] = {
             'start_time': globalClock.getFrameTime(),
             'pos_x': pos_x,
-            'pos_y': pos_y
+            'pos_y': pos_y,
+            'rotation_speed': random.uniform(-180, 180),  # Degrees per second
+            'initial_rotation': initial_rotation
         }
         
         self.explosions.append(explosion)
-        print(f"Explosion created at {pos_x}, {pos_y}")
 
     def update_explosions(self, task):
         current_time = globalClock.getFrameTime()
@@ -435,26 +482,42 @@ class Game(ShowBase):
             if explosion not in self.explosion_data:
                 continue
                 
-            start_time = self.explosion_data[explosion]['start_time']
+            data = self.explosion_data[explosion]
+            start_time = data['start_time']
             age = current_time - start_time
             
             if age > self.explosion_duration:
                 explosion.removeNode()
                 self.explosions.remove(explosion)
                 self.explosion_data.pop(explosion)
-                print("Explosion removed")
                 continue
             
             # Calculate progress (0 to 1)
             progress = age / self.explosion_duration
             
-            # Make the explosion larger and last longer
-            current_size = 0.1 + (0.4 * progress)  # Increased maximum size
+            # Non-linear scaling for more dynamic effect
+            scale_factor = math.sin(progress * math.pi) * 0.5 + 0.5
+            current_size = 0.1 + (0.3 * scale_factor)
             explosion.setScale(current_size)
             
-            # Keep full opacity longer, then fade quickly
-            alpha = 1.0 if progress < 0.7 else (1.0 - ((progress - 0.7) / 0.3))
-            explosion.setColorScale(1, 0.5, 0, alpha)  # Bright orange fade
+            # Update rotation
+            rotation = data['initial_rotation'] + (data['rotation_speed'] * age)
+            explosion.setR(rotation)
+            
+            # Color and alpha animation
+            if progress < 0.3:
+                # Initial bright flash
+                intensity = 1.0
+            else:
+                # Fade out with slight pulsing
+                intensity = 1.0 - ((progress - 0.3) / 0.7)
+                pulse = math.sin(progress * 20) * 0.1
+                intensity = max(0, min(1, intensity + pulse))
+            
+            # Keep the RGB at full value but vary the alpha
+            explosion.setColorScale(1, 1, 1, intensity)
+        
+        return task.cont
 
 game = Game()
 game.run()
