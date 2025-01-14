@@ -21,6 +21,12 @@ class Game(ShowBase):
         props = self.win.getProperties()
         self.aspect_ratio = props.getXSize() / props.getYSize()
 
+
+        # Add these new variables with your other initializations
+        self.explosions = []  # List to track active explosions
+        self.explosion_duration = 0.3  # Duration in seconds
+        self.explosion_data = {}  # Store start time and initial position for each explosion
+
         self.enemies = []
         self.max_enemy_speed = 0.01  # This is now the maximum speed
         self.num_enemies = 10
@@ -245,14 +251,12 @@ class Game(ShowBase):
         # Update projectiles
         for projectile in self.projectiles[:]:
             current_pos = projectile.getPos()
-            # Get the projectile's direction from its Python tag
             direction = projectile.getPythonTag("direction")
-            # Move projectile in its stored direction
             new_x = current_pos[0] + direction[0] * self.projectile_speed
             new_z = current_pos[2] + direction[1] * self.projectile_speed
             projectile.setPos(new_x, 0, new_z)
             
-            # Remove if off screen (check all edges)
+            # Remove if off screen
             if (new_x > self.aspect_ratio + 0.1 or 
                 new_x < -self.aspect_ratio - 0.1 or 
                 new_z > 1.1 or 
@@ -260,49 +264,49 @@ class Game(ShowBase):
                 projectile.removeNode()
                 self.projectiles.remove(projectile)
 
-            # Update enemies
+        # Update enemies (moved outside projectile loop)
+        for enemy in self.enemies[:]:
+            enemy_pos = enemy.getPos()
+            player_pos = (self.player_pos[0], self.player_pos[1])
+            
+            dx = player_pos[0] - enemy_pos[0]
+            dy = player_pos[1] - enemy_pos[2]
+            
+            distance = math.sqrt(dx * dx + dy * dy)
+            if distance > 0:
+                dx /= distance
+                dy /= distance
+            
+            enemy_speed = self.enemy_data[enemy]
+            new_x = enemy_pos[0] + dx * enemy_speed
+            new_y = enemy_pos[2] + dy * enemy_speed
+            
+            # Keep enemy within screen bounds
+            new_x = max(min(new_x, self.aspect_ratio - 0.05), -self.aspect_ratio + 0.05)
+            new_y = max(min(new_y, 0.95), -0.95)
+            
+            enemy.setPos(new_x, 0, new_y)
+            
+            # Check for collision with player
+            if (abs(self.player_pos[0] - new_x) < 0.07 and 
+                abs(self.player_pos[1] - new_y) < 0.07):
+                print("Game Over!")
+        
+        # Check for projectile-enemy collisions (separate loop)
+        for projectile in self.projectiles[:]:
+            proj_pos = projectile.getPos()
             for enemy in self.enemies[:]:
                 enemy_pos = enemy.getPos()
-                player_pos = (self.player_pos[0], self.player_pos[1])
-                
-                dx = player_pos[0] - enemy_pos[0]
-                dy = player_pos[1] - enemy_pos[2]
-                
-                distance = math.sqrt(dx * dx + dy * dy)
-                if distance > 0:
-                    dx /= distance
-                    dy /= distance
-                
-                # Use enemy's specific speed
-                enemy_speed = self.enemy_data[enemy]
-                new_x = enemy_pos[0] + dx * enemy_speed
-                new_y = enemy_pos[2] + dy * enemy_speed
-                
-                # Keep enemy within screen bounds
-                new_x = max(min(new_x, self.aspect_ratio - 0.05), -self.aspect_ratio + 0.05)
-                new_y = max(min(new_y, 0.95), -0.95)
-                
-                enemy.setPos(new_x, 0, new_y)
-                
-                # Check for collisions with projectiles
-                for projectile in self.projectiles[:]:
-                    proj_pos = projectile.getPos()
-                    if (abs(proj_pos[0] - new_x) < 0.07 and 
-                        abs(proj_pos[2] - new_y) < 0.07):
-                        # Remove enemy data before removing enemy
-                        self.enemy_data.pop(enemy)
-                        enemy.removeNode()
-                        projectile.removeNode()
-                        self.enemies.remove(enemy)
-                        self.projectiles.remove(projectile)
-                        self.spawn_single_enemy()
-                        break
-            
-            # Check for collision with player (game over condition)
-            if (abs(player_pos[0] - new_x) < 0.07 and 
-                abs(player_pos[1] - new_y) < 0.07):
-                print("Game Over!")  # You might want to add proper game over handling
-            
+                if (abs(proj_pos[0] - enemy_pos[0]) < 0.07 and 
+                    abs(proj_pos[2] - enemy_pos[2]) < 0.07):
+                    self.enemy_data.pop(enemy)
+                    enemy.removeNode()
+                    projectile.removeNode()
+                    self.enemies.remove(enemy)
+                    self.projectiles.remove(projectile)
+                    self.spawn_single_enemy()
+                    break
+        
         return Task.cont
 
     def createProjectile(self, direction_x, direction_y):
