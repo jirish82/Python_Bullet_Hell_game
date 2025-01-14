@@ -103,6 +103,7 @@ class Game(ShowBase):
                 self.music.play()
                 self.music_playing = True
                 self.music_paused = False
+                self.music.stop()
             else:
                 print("Could not load music file")
                 self.music_playing = False
@@ -570,8 +571,12 @@ class Game(ShowBase):
         
         if self.paused:
             self.pause_text.show()
+            # Stop the music
+            self.music.stop()
         else:
             self.pause_text.hide()
+            # Resume the music
+            self.music.play()
 
 game = Game()
 game.run()
