@@ -49,3 +49,8 @@ local_settings.py
 *.db
 *.sqlite3
 launch.json
+map.png
+music.mid
+music.mp3
+player.png
+players.png
