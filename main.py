@@ -3,6 +3,8 @@ from direct.task import Task
 from panda3d.core import TextureStage, TransparencyAttrib, CardMaker
 from panda3d.core import WindowProperties
 from panda3d.core import loadPrcFileData
+from panda3d.core import InputDevice
+import math
 
 # Add audio configuration
 loadPrcFileData('', 'audio-library-name p3openal_audio')
@@ -13,6 +15,17 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        # Initialize projectiles list
+        self.projectiles = []
+        self.projectile_speed = 0.03
+        
+        # Initialize trigger state
+        self.last_trigger_state = 0
+
+        # Initialize gamepad
+        self.gamepad = None
+        self.initGamepad()
+        
         # Disable mouse control of the camera
         self.disableMouse()
         
@@ -30,7 +43,7 @@ class Game(ShowBase):
         
         # Load and play background music
         try:
-            self.music = self.loader.loadSfx("music.mp3")  # Changed to loadSfx
+            self.music = self.loader.loadSfx("music.mp3")
             if self.music:
                 self.music.setLoop(True)
                 self.music.setVolume(0.8)
@@ -45,9 +58,6 @@ class Game(ShowBase):
             print(f"Error loading music: {e}")
             self.music_playing = False
             self.music_paused = False
-        
-        # Rest of your initialization code...
-        # [Previous code for background and player sprite remains the same]
         
         # Load and set up the background
         self.background = self.loader.loadTexture("map.png")
@@ -66,8 +76,9 @@ class Game(ShowBase):
         self.player.setTexture(player_tex)
         self.player.setTransparency(TransparencyAttrib.MAlpha)
         
-        # Initialize player position
+        # Initialize player position and movement
         self.player_pos = [0, 0]
+        self.movement_speed = 0.02
         
         # Set up key monitoring
         self.keys = {}
@@ -91,6 +102,20 @@ class Game(ShowBase):
         
         # Add the game loop update task
         self.taskMgr.add(self.update, "update")
+        
+    def initGamepad(self):
+        devices = self.devices.getDevices(InputDevice.DeviceClass.gamepad)
+        if devices:
+            self.gamepad = devices[0]
+            self.attachInputDevice(self.gamepad, prefix="gamepad")
+            print("Gamepad connected:", self.gamepad.name)  # Changed from deviceClass.name to name
+            
+            # Set up gamepad button handlers
+            self.accept("gamepad-face_a", self.toggleMusic)
+            self.accept("gamepad-face_b", self.togglePause)
+            self.accept("gamepad-face_y", self.toggleFullscreen)
+        else:
+            print("No gamepad detected")
         
     def toggleMusic(self):
         if hasattr(self, 'music') and self.music:
@@ -120,23 +145,106 @@ class Game(ShowBase):
         self.keys[key] = value
         
     def update(self, task):
-        speed = 0.02
+        # Handle keyboard input
+        dx = 0
+        dy = 0
         
         if self.keys["arrow_left"]:
-            self.player_pos[0] -= speed
+            dx -= self.movement_speed
         if self.keys["arrow_right"]:
-            self.player_pos[0] += speed
+            dx += self.movement_speed
         if self.keys["arrow_up"]:
-            self.player_pos[1] += speed
+            dy += self.movement_speed
         if self.keys["arrow_down"]:
-            self.player_pos[1] -= speed
+            dy -= self.movement_speed
             
+        # Handle gamepad input
+        if self.gamepad:
+            # Left analog stick
+            left_x = self.gamepad.findAxis(InputDevice.Axis.left_x).value
+            left_y = self.gamepad.findAxis(InputDevice.Axis.left_y).value
+            
+            # Add deadzone
+            deadzone = 0.2
+            if abs(left_x) < deadzone: left_x = 0
+            if abs(left_y) < deadzone: left_y = 0
+            
+            # Add gamepad movement (removed the negative sign from left_y)
+            dx += left_x * self.movement_speed
+            dy += left_y * self.movement_speed  # Changed from dy -= to dy +=
+            
+            # D-pad support
+            if self.gamepad.findButton("dpad_left").pressed:
+                dx -= self.movement_speed
+            if self.gamepad.findButton("dpad_right").pressed:
+                dx += self.movement_speed
+            if self.gamepad.findButton("dpad_up").pressed:
+                dy += self.movement_speed
+            if self.gamepad.findButton("dpad_down").pressed:
+                dy -= self.movement_speed
+        
+        # Update position
+        self.player_pos[0] += dx
+        self.player_pos[1] += dy
+            
+        # Clamp position to screen bounds
         self.player_pos[0] = max(-self.aspect_ratio + 0.05, min(self.aspect_ratio - 0.05, self.player_pos[0]))
         self.player_pos[1] = max(-0.95, min(0.95, self.player_pos[1]))
         
+        # Update player sprite position
         self.player.setPos(self.player_pos[0], 0, self.player_pos[1])
-        
+
+
+
+        # Handle projectile firing with right trigger
+        if self.gamepad:
+            # Try both possible trigger axes
+            trigger_value = max(
+                self.gamepad.findAxis(InputDevice.Axis.right_trigger).value,
+                self.gamepad.findAxis(InputDevice.Axis.right_y).value  # Some controllers use right_y for trigger
+            )
+            
+            # Debug print to see trigger values
+            # print(f"Trigger value: {trigger_value}")
+            
+            # Trigger pressed (checking for positive movement)
+            if trigger_value > 0.5 and self.last_trigger_state <= 0.5:  # Adjusted threshold
+                self.createProjectile()
+            
+            self.last_trigger_state = trigger_value
+
+        # Update projectiles
+        for projectile in self.projectiles[:]:
+            current_pos = projectile.getPos()
+            new_x = current_pos[0] + self.projectile_speed
+            projectile.setPos(new_x, 0, current_pos[2])
+            
+            # Remove if off screen
+            if new_x > self.aspect_ratio + 0.1:
+                projectile.removeNode()
+                self.projectiles.remove(projectile)
+            
         return Task.cont
+
+    def createProjectile(self):
+        # Create a projectile using the orb image
+        cm = CardMaker("projectile")
+        projectile_size = 0.02
+        cm.setFrame(-projectile_size, projectile_size, -projectile_size, projectile_size)
+        projectile = self.render2d.attachNewNode(cm.generate())
+        
+        # Load and apply the orb texture
+        projectile_tex = self.loader.loadTexture("orb.png")
+        projectile.setTexture(projectile_tex)
+        projectile.setTransparency(TransparencyAttrib.MAlpha)  # Enable transparency for PNG
+        
+        # Position it at the player's location
+        projectile.setPos(self.player_pos[0], 0, self.player_pos[1])
+        
+        print("Projectile created!")  # Debug message
+        
+        # Add to projectiles list
+        self.projectiles.append(projectile)
 
 game = Game()
 game.run()
