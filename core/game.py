@@ -12,6 +12,14 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        # Add these new speed-related variables
+        self.initial_max_speed = 0.006  # Same as before
+        self.max_enemy_speed = self.initial_max_speed
+        self.min_speed_ratio = 0.1  # Starting minimum speed ratio
+        self.speed_window_threshold = 0.5  # Trigger max speed increase at 50% instead of 80%
+        self.max_speed_increase = 0.0005  # Same as before
+        self.speed_difficulty_points = 3
+
         self.num_enemies = 3  # Start with 3 enemies
         self.base_num_enemies = 3  # Store the initial number
         self.enemies_per_score = 3  # Increase enemies every 3 points
@@ -416,15 +424,15 @@ class Game(ShowBase):
         # Calculate spawn position based on side
         if side == 'top':
             x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = 1 + buffer  # Just above the visible screen
+            y = 1 + buffer
         elif side == 'bottom':
             x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = -1 - buffer  # Just below the visible screen
+            y = -1 - buffer
         elif side == 'left':
-            x = -self.aspect_ratio - buffer  # Just left of the visible screen
+            x = -self.aspect_ratio - buffer
             y = random.uniform(-1 + enemy_size, 1 - enemy_size)
         else:  # right
-            x = self.aspect_ratio + buffer  # Just right of the visible screen
+            x = self.aspect_ratio + buffer
             y = random.uniform(-1 + enemy_size, 1 - enemy_size)
 
         # Create the enemy
@@ -436,8 +444,18 @@ class Game(ShowBase):
         enemy.setTransparency(TransparencyAttrib.MAlpha)
         enemy.setPos(x, 0, y)
         
-        # Set random speed for the enemy
-        self.enemy_data[enemy] = random.uniform(0.3 * self.max_enemy_speed, self.max_enemy_speed)
+        # Calculate speed with progressive difficulty
+        min_speed = self.max_enemy_speed * self.min_speed_ratio
+        
+        # Higher chance of max speed based on score
+        max_speed_chance = min(0.8, 0.1 + (self.score / self.enemies_per_score * 0.1))
+        
+        if random.random() < max_speed_chance:
+            speed = self.max_enemy_speed
+        else:
+            speed = random.uniform(min_speed, self.max_enemy_speed)
+        
+        self.enemy_data[enemy] = speed
         self.enemies.append(enemy)
 
     def create_explosion(self, pos_x, pos_y):
@@ -546,6 +564,10 @@ class Game(ShowBase):
         self.game_over_text.hide()
         self.pause_text.hide()
         self.paused = False
+
+        # Reset speed-related variables
+        self.max_enemy_speed = self.initial_max_speed
+        self.min_speed_ratio = 0.3
         
         # Reset score and difficulty
         self.score = 0
@@ -575,9 +597,23 @@ class Game(ShowBase):
             self.music.play()
 
     def check_difficulty_increase(self):
-        enemy_increase_threshold = self.score // self.enemies_per_score
-        if enemy_increase_threshold > self.previous_enemy_increase:
+        difficulty_level = self.score // self.enemies_per_score
+        if difficulty_level > self.previous_enemy_increase:
+            # Increase number of enemies
             self.num_enemies += 1
-            self.previous_enemy_increase = enemy_increase_threshold
+            self.previous_enemy_increase = difficulty_level
+            
+            # Calculate new minimum speed ratio
+            new_min_ratio = self.min_speed_ratio + (0.1 * difficulty_level)  # Increase by 10% each time
+            
+            # If minimum speed would be too close to max speed
+            if new_min_ratio >= self.speed_window_threshold:
+                # Increase max speed
+                self.max_enemy_speed += self.max_speed_increase
+                # Reset minimum speed ratio to create new window
+                new_min_ratio = self.min_speed_ratio
+            
+            self.min_speed_ratio = min(new_min_ratio, self.speed_window_threshold)
+            
             # Spawn the additional enemy
             self.spawn_single_enemy()
