@@ -34,6 +34,12 @@ class Game(ShowBase):
         self.orb_points_interval = 10  # Spawn orb every 10 points
         self.last_orb_spawn_score = 0
 
+        self.blue_orb = None
+        self.blue_orb_spawn_time = None
+        self.blue_orb_duration = 3.0  # 3 seconds
+        self.blue_orb_interval = 11.0  # Spawn every 11 seconds
+        self.last_blue_orb_spawn_time = time.time()
+
         self.score = 0
         self.score_text = OnscreenText(
             text="Score: 0",
@@ -395,6 +401,9 @@ class Game(ShowBase):
 
         self.update_orb()
         self.check_orb_collection()
+
+        self.update_blue_orb()
+        self.check_blue_orb_collection()
         
         return Task.cont
 
@@ -602,6 +611,11 @@ class Game(ShowBase):
             self.green_orb = None
         self.last_orb_spawn_score = 0
 
+        if self.blue_orb:
+            self.blue_orb.removeNode()
+            self.blue_orb = None
+        self.last_blue_orb_spawn_time = time.time()
+
         # Reset speed-related variables
         self.game_start_time = time.time()
         
@@ -743,3 +757,98 @@ class Game(ShowBase):
             if current_time - self.orb_spawn_time > self.orb_duration:
                 self.green_orb.removeNode()
                 self.green_orb = None
+
+    def create_blue_orb(self):
+        if self.blue_orb:  # Remove existing orb if there is one
+            self.blue_orb.removeNode()
+            
+        cm = CardMaker("blue_orb")
+        orb_size = 0.05
+        cm.setFrame(-orb_size, orb_size, -orb_size, orb_size)
+        self.blue_orb = self.render2d.attachNewNode(cm.generate())
+        
+        # Create a vibrant blue glowing texture
+        texture_size = 128
+        image = PNMImage(texture_size, texture_size, 4)
+        center_x = texture_size // 2
+        center_y = texture_size // 2
+        radius = texture_size // 2
+        
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                if distance <= radius:
+                    intensity = 1.0 - (distance / radius)
+                    intensity = intensity ** 0.5
+                    
+                    if distance < radius * 0.3:
+                        # White-blue center
+                        image.setXel(x, y, 0.8, 0.8, 1.0)
+                        image.setAlpha(x, y, 1.0)
+                    else:
+                        # Vibrant blue glow
+                        image.setXel(x, y, 0.2, 0.2, 1.0)
+                        image.setAlpha(x, y, min(1.0, intensity * 1.5))
+                else:
+                    image.setAlpha(x, y, 0)
+        
+        texture = Texture()
+        texture.load(image)
+        self.blue_orb.setTexture(texture)
+        self.blue_orb.setTransparency(TransparencyAttrib.MAlpha)
+        
+        self.blue_orb.setBin('fixed', 100)
+        self.blue_orb.setDepthTest(False)
+        self.blue_orb.setDepthWrite(False)
+        
+        # Random position within visible bounds, 10% constrained
+        x = random.uniform(-self.aspect_ratio * 0.9 + 0.1, self.aspect_ratio * 0.9 - 0.1)
+        y = random.uniform(-0.8, 0.8)
+        self.blue_orb.setPos(x, 0, y)
+        
+        self.blue_orb_spawn_time = time.time()
+        
+        taskMgr.add(self.pulse_blue_orb, "pulseBlueOrb")
+
+    def pulse_blue_orb(self, task):
+        if not self.blue_orb:
+            return Task.done
+        
+        pulse_speed = 3.0
+        pulse_magnitude = 0.2
+        
+        base_scale = 1.0
+        pulse = math.sin(task.time * pulse_speed) * pulse_magnitude
+        new_scale = base_scale + pulse
+        
+        self.blue_orb.setScale(new_scale)
+        
+        return Task.cont
+
+    def check_blue_orb_collection(self):
+        if not self.blue_orb:
+            return
+            
+        orb_pos = self.blue_orb.getPos()
+        if (abs(self.player_pos[0] - orb_pos[0]) < 0.1 and 
+            abs(self.player_pos[1] - orb_pos[2]) < 0.1):
+            # Collected the blue orb - add 10 seconds to game_start_time
+            self.game_start_time += 10
+            self.blue_orb.removeNode()
+            self.blue_orb = None
+
+    def update_blue_orb(self):
+        current_time = time.time()
+        
+        # Check if we should spawn a new blue orb
+        if current_time - self.last_blue_orb_spawn_time >= self.blue_orb_interval:
+            self.create_blue_orb()
+            self.last_blue_orb_spawn_time = current_time
+        
+        # Remove orb if it's been there too long
+        if self.blue_orb and self.blue_orb_spawn_time:
+            if current_time - self.blue_orb_spawn_time > self.blue_orb_duration:
+                self.blue_orb.removeNode()
+                self.blue_orb = None
