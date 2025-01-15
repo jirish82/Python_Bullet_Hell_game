@@ -12,6 +12,16 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.game_over = False
+        self.game_over_text = OnscreenText(
+            text="GAME OVER\nPress START or P to restart",
+            pos=(0, 0),
+            scale=0.1,
+            fg=(1, 0, 0, 1),
+            shadow=(0, 0, 0, 1)
+        )
+        self.game_over_text.hide()
+
         self.paused = True
     
         # Clear any existing bindings
@@ -156,15 +166,18 @@ class Game(ShowBase):
         self.taskMgr.add(self.update, "update")
 
     def custom_toggle_pause(self):
-        self.paused = not self.paused
-        if self.paused:
-            self.pause_text.show()
-            if hasattr(self, 'music') and self.music:
-                self.music.stop()
+        if self.game_over:
+            self.restart_game()
         else:
-            self.pause_text.hide()
-            if hasattr(self, 'music') and self.music:
-                self.music.play()
+            self.paused = not self.paused
+            if self.paused:
+                self.pause_text.show()
+                if hasattr(self, 'music') and self.music:
+                    self.music.stop()
+            else:
+                self.pause_text.hide()
+                if hasattr(self, 'music') and self.music:
+                    self.music.play()
 
     def initGamepad(self):
         devices = self.devices.getDevices(InputDevice.DeviceClass.gamepad)
@@ -208,7 +221,7 @@ class Game(ShowBase):
         self.keys[key] = value
         
     def update(self, task):
-        if self.paused:
+        if self.paused or self.game_over:
             return task.cont
 
         # Handle keyboard input
@@ -317,7 +330,11 @@ class Game(ShowBase):
             
             if (abs(self.player_pos[0] - new_x) < 0.07 and 
                 abs(self.player_pos[1] - new_y) < 0.07):
-                print("Game Over!")
+                self.game_over = True
+                self.game_over_text.show()
+                self.paused = True
+                if hasattr(self, 'music') and self.music:
+                    self.music.stop()
         
         # Check for projectile-enemy collisions
         for projectile in self.projectiles[:]:
@@ -503,3 +520,31 @@ class Game(ShowBase):
             explosion.setColorScale(1, 1, 1, intensity)
         
         return task.cont
+
+    def restart_game(self):
+        # Reset game state
+        self.game_over = False
+        self.game_over_text.hide()
+        self.pause_text.hide()
+        self.paused = False
+        
+        # Reset player position
+        self.player_pos = [0, 0]
+        self.player.setPos(0, 0, 0)
+        
+        # Clear existing enemies and projectiles
+        for enemy in self.enemies:
+            enemy.removeNode()
+        self.enemies.clear()
+        self.enemy_data.clear()
+        
+        for projectile in self.projectiles:
+            projectile.removeNode()
+        self.projectiles.clear()
+        
+        # Respawn enemies
+        self.spawn_enemies()
+        
+        # Restart music if it exists
+        if hasattr(self, 'music') and self.music:
+            self.music.play()
