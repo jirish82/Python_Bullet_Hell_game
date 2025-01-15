@@ -25,10 +25,24 @@ window-title Castle Bullet
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
+    # Define common file extensions
+    image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.tiff', '.webp'}
+    sound_extensions = {'.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac'}
+    
     try:
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
+    
+    # Convert the relative path to Path object
+    path_obj = Path(relative_path)
+    extension = path_obj.suffix.lower()
+    
+    # Determine if file should go in a subdirectory
+    if extension in image_extensions:
+        relative_path = Path("images") / path_obj
+    elif extension in sound_extensions:
+        relative_path = Path("sounds") / path_obj
     
     # Convert to Path object and resolve
     full_path = Path(base_path) / relative_path
