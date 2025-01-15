@@ -203,6 +203,16 @@ class Game(ShowBase):
         # Add the game loop update task
         self.taskMgr.add(self.update, "update")
 
+        self.debug_text = OnscreenText(
+        text="",
+        pos=(self.aspect_ratio - 0.1, 0.9),  # Top right position
+        scale=0.04,
+        fg=(1, 1, 1, 1),  # White text
+        align=TextNode.ARight,
+        mayChange=True,
+        bg=(0, 0, 0, 0.5)  # Semi-transparent black background
+    )
+
     def custom_toggle_pause(self):
         if self.game_over:
             self.restart_game()
@@ -321,7 +331,7 @@ class Game(ShowBase):
             
             deadzone = 0.2
             if (stick_magnitude > deadzone and 
-                trigger_value > 0.5 and 
+                #trigger_value > 0.5 and 
                 current_time - self.last_fire_time >= self.fire_rate):
                 direction_x = right_x / stick_magnitude
                 direction_y = right_y / stick_magnitude
@@ -404,6 +414,8 @@ class Game(ShowBase):
 
         self.update_blue_orb()
         self.check_blue_orb_collection()
+
+        self.update_debug_text()
         
         return Task.cont
 
@@ -852,3 +864,14 @@ class Game(ShowBase):
             if current_time - self.blue_orb_spawn_time > self.blue_orb_duration:
                 self.blue_orb.removeNode()
                 self.blue_orb = None
+
+    def update_debug_text(self):
+        current_time = time.time()
+        effective_time = current_time - self.game_start_time
+        
+        debug_str = (
+            f"Enemy Limit: {self.enemy_limit}\n"
+            f"Game Time: {effective_time:.1f}s"
+        )
+        
+        self.debug_text.setText(debug_str)
