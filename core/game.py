@@ -6,6 +6,7 @@ from panda3d.core import WindowProperties, InputDevice
 import math
 import random
 from utils.resource_loader import get_resource_path
+import time
 
 
 class Game(ShowBase):
@@ -13,16 +14,15 @@ class Game(ShowBase):
         ShowBase.__init__(self)
 
         # Add these new speed-related variables
-        self.initial_max_speed = 0.006  # Same as before
-        self.max_enemy_speed = self.initial_max_speed
-        self.min_speed_ratio = 0.1  # Starting minimum speed ratio
-        self.speed_window_threshold = 0.5  # Trigger max speed increase at 50% instead of 80%
-        self.max_speed_increase = 0.0005  # Same as before
-        self.speed_difficulty_points = 3
+        self.speed_base_min = 0.001
+        self.speed_base_max = 0.003
+        self.speed_min_increase_rate = 0.0001  # per second
+        self.speed_max_increase_rate = 0.0002  # per second
+        self.game_start_time = time.time()
 
-        self.num_enemies = 3  # Start with 3 enemies
-        self.base_num_enemies = 3  # Store the initial number
-        self.enemies_per_score = 3  # Increase enemies every 3 points
+        self.num_enemies = 10  # Start with 3 enemies
+        self.base_num_enemies = 10  # Store the initial number
+        self.enemies_per_score = 10  # Increase enemies every 3 points
         self.previous_enemy_increase = 0  # Track when we last increased enemies
 
         self.score = 0
@@ -400,20 +400,41 @@ class Game(ShowBase):
 
     def spawn_enemies(self):
         for _ in range(self.num_enemies):
-            cm = CardMaker("enemy")
+            side = random.choice(['top', 'bottom', 'left', 'right'])
             enemy_size = 0.05
+            buffer = 0.1  # Small buffer distance outside the screen
+
+            # Calculate spawn position based on side
+            if side == 'top':
+                x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
+                y = 1 + buffer
+            elif side == 'bottom':
+                x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
+                y = -1 - buffer
+            elif side == 'left':
+                x = -self.aspect_ratio - buffer
+                y = random.uniform(-1 + enemy_size, 1 - enemy_size)
+            else:  # right
+                x = self.aspect_ratio + buffer
+                y = random.uniform(-1 + enemy_size, 1 - enemy_size)
+
+            # Create the enemy
+            cm = CardMaker("enemy")
             cm.setFrame(-enemy_size, enemy_size, -enemy_size, enemy_size)
             enemy = self.render2d.attachNewNode(cm.generate())
-            
             enemy_tex = self.loader.loadTexture(get_resource_path("enemy.png"))
             enemy.setTexture(enemy_tex)
             enemy.setTransparency(TransparencyAttrib.MAlpha)
-            
-            x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = random.uniform(-1 + enemy_size, 1 - enemy_size)
             enemy.setPos(x, 0, y)
             
-            self.enemy_data[enemy] = random.uniform(0.3 * self.max_enemy_speed, self.max_enemy_speed)
+            # Calculate time-based speed limits
+            seconds_elapsed = time.time() - self.game_start_time
+            current_min = self.speed_base_min + (self.speed_min_increase_rate * seconds_elapsed)
+            current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
+            
+            # Random speed between current limits
+            speed = random.uniform(current_min, current_max)
+            self.enemy_data[enemy] = speed
             self.enemies.append(enemy)
 
     def spawn_single_enemy(self):
@@ -444,17 +465,13 @@ class Game(ShowBase):
         enemy.setTransparency(TransparencyAttrib.MAlpha)
         enemy.setPos(x, 0, y)
         
-        # Calculate speed with progressive difficulty
-        min_speed = self.max_enemy_speed * self.min_speed_ratio
+        # Calculate time-based speed limits
+        seconds_elapsed = time.time() - self.game_start_time
+        current_min = self.speed_base_min + (self.speed_min_increase_rate * seconds_elapsed)
+        current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
         
-        # Higher chance of max speed based on score
-        max_speed_chance = min(0.8, 0.1 + (self.score / self.enemies_per_score * 0.1))
-        
-        if random.random() < max_speed_chance:
-            speed = self.max_enemy_speed
-        else:
-            speed = random.uniform(min_speed, self.max_enemy_speed)
-        
+        # Random speed between current limits
+        speed = random.uniform(current_min, current_max)
         self.enemy_data[enemy] = speed
         self.enemies.append(enemy)
 
@@ -566,8 +583,7 @@ class Game(ShowBase):
         self.paused = False
 
         # Reset speed-related variables
-        self.max_enemy_speed = self.initial_max_speed
-        self.min_speed_ratio = 0.3
+        self.game_start_time = time.time()
         
         # Reset score and difficulty
         self.score = 0
@@ -602,18 +618,6 @@ class Game(ShowBase):
             # Increase number of enemies
             self.num_enemies += 1
             self.previous_enemy_increase = difficulty_level
-            
-            # Calculate new minimum speed ratio
-            new_min_ratio = self.min_speed_ratio + (0.1 * difficulty_level)  # Increase by 10% each time
-            
-            # If minimum speed would be too close to max speed
-            if new_min_ratio >= self.speed_window_threshold:
-                # Increase max speed
-                self.max_enemy_speed += self.max_speed_increase
-                # Reset minimum speed ratio to create new window
-                new_min_ratio = self.min_speed_ratio
-            
-            self.min_speed_ratio = min(new_min_ratio, self.speed_window_threshold)
             
             # Spawn the additional enemy
             self.spawn_single_enemy()
