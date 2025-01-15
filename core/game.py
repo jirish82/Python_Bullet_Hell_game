@@ -661,11 +661,12 @@ class Game(ShowBase):
     def check_difficulty_increase(self):
         difficulty_level = self.score // self.enemies_per_score
         if difficulty_level > self.previous_enemy_increase:
-            # Increase number of enemies
+            # Increase both the limit and current number
             self.num_enemies += 1
+            self.enemy_limit = self.num_enemies  # Update the limit too
             self.previous_enemy_increase = difficulty_level
             
-            # Spawn the additional enemy
+            # Spawn the additional enemy immediately
             self.spawn_single_enemy()
 
     def create_green_orb(self):
