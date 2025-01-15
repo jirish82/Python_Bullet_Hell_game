@@ -1,17 +1,56 @@
 from direct.showbase.ShowBase import ShowBase
 from direct.gui.OnscreenText import OnscreenText
 from direct.task import Task
-from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture
+from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture, loadPrcFile, loadPrcFileData
 from panda3d.core import WindowProperties
 from panda3d.core import loadPrcFileData
 from panda3d.core import InputDevice
 import math
 import random
+import os
+import sys
+from pathlib import Path
+
+
+#pyinstaller --add-data "*.png;." --add-data "*.mp3;." --hidden-import direct.showbase.ShowBase --hidden-import panda3d.core --hidden-import direct.task --hidden-import direct.task.Task --hidden-import direct.gui --hidden-import direct.showbase --add-binary ".\.env\Lib\site-packages\panda3d\*;panda3d" --add-binary ".\.env\Lib\site-packages\panda3d\libpandagl.dll;." main.py
+
+# Configure panda3d
+loadPrcFileData('', '''
+load-display pandagl
+audio-library-name p3openal_audio
+win-size 1920 1080
+window-title Castle Bullet
+''')
+
+
+def get_resource_path(relative_path):
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    
+    # Convert to Path object and resolve
+    full_path = Path(base_path) / relative_path
+    full_path = full_path.resolve()
+    
+    # Convert to forward slashes and make relative
+    unix_path = str(full_path).replace('\\', '/')
+    
+    # Remove drive letter if present (e.g., C:)
+    if ':' in unix_path:
+        unix_path = unix_path[unix_path.index(':') + 1:]
+    
+    print(f"Looking for resource: {relative_path}")
+    print(f"Converted path: {unix_path}")
+    print(f"File exists: {full_path.exists()}")
+    
+    return unix_path
 
 # Add audio configuration
 loadPrcFileData('', 'audio-library-name p3openal_audio')
 loadPrcFileData('', 'win-size 1920 1080')
-loadPrcFileData('', 'window-title My 2D Game')
+loadPrcFileData('', 'window-title Castle Bullet')
 
 class Game(ShowBase):
     def __init__(self):
@@ -96,7 +135,7 @@ class Game(ShowBase):
         
         # Load and play background music
         try:
-            self.music = self.loader.loadSfx("music.mp3")
+            self.music = self.loader.loadSfx(get_resource_path("music.mp3"))
             if self.music:
                 self.music.setLoop(True)
                 self.music.setVolume(0.8)
@@ -104,6 +143,10 @@ class Game(ShowBase):
                 self.music_playing = True
                 self.music_paused = False
                 self.music.stop()
+
+                # Add these after your music setup
+                self.enemy_death_sound = loader.loadSfx(get_resource_path("enemy_death.mp3"))
+                self.gun_sound = loader.loadSfx(get_resource_path("gun.mp3"))
             else:
                 print("Could not load music file")
                 self.music_playing = False
@@ -113,8 +156,10 @@ class Game(ShowBase):
             self.music_playing = False
             self.music_paused = False
         
+
+
         # Load and set up the background
-        self.background = self.loader.loadTexture("map.png")
+        self.background = self.loader.loadTexture(get_resource_path("map.png"))
         cm = CardMaker("background")
         cm.setFrame(-self.aspect_ratio, self.aspect_ratio, -1, 1)
         self.background_node = self.render2d.attachNewNode(cm.generate())
@@ -126,7 +171,7 @@ class Game(ShowBase):
         aspect_adjusted_size = player_size * self.aspect_ratio
         cm.setFrame(-player_size, player_size, -player_size, player_size)
         self.player = self.render2d.attachNewNode(cm.generate())
-        player_tex = self.loader.loadTexture("player.png")
+        player_tex = self.loader.loadTexture(get_resource_path("player.png"))
         self.player.setTexture(player_tex)
         self.player.setTransparency(TransparencyAttrib.MAlpha)
         
@@ -279,6 +324,7 @@ class Game(ShowBase):
                 direction_x = right_x / stick_magnitude
                 direction_y = right_y / stick_magnitude
                 self.createProjectile(direction_x, direction_y)
+                self.gun_sound.play()
                 self.last_fire_time = current_time
 
         # Update projectiles
@@ -341,6 +387,7 @@ class Game(ShowBase):
                     enemy.removeNode()
                     projectile.removeNode()
                     self.enemies.remove(enemy)
+                    self.enemy_death_sound.play()
                     self.projectiles.remove(projectile)
                     self.spawn_single_enemy()
                     break
@@ -358,7 +405,7 @@ class Game(ShowBase):
         projectile = self.render2d.attachNewNode(cm.generate())
         
         # Load and apply the orb texture
-        projectile_tex = self.loader.loadTexture("orb.png")
+        projectile_tex = self.loader.loadTexture(get_resource_path("orb.png"))
         projectile.setTexture(projectile_tex)
         projectile.setTransparency(TransparencyAttrib.MAlpha)
         
@@ -381,7 +428,7 @@ class Game(ShowBase):
             enemy = self.render2d.attachNewNode(cm.generate())
             
             # Load and apply enemy texture
-            enemy_tex = self.loader.loadTexture("enemy.png")
+            enemy_tex = self.loader.loadTexture(get_resource_path("enemy.png"))
             enemy.setTexture(enemy_tex)
             enemy.setTransparency(TransparencyAttrib.MAlpha)
             
@@ -420,7 +467,7 @@ class Game(ShowBase):
         enemy = self.render2d.attachNewNode(cm.generate())
         
         # Load and apply enemy texture
-        enemy_tex = self.loader.loadTexture("enemy.png")
+        enemy_tex = self.loader.loadTexture(get_resource_path("enemy.png"))
         enemy.setTexture(enemy_tex)
         enemy.setTransparency(TransparencyAttrib.MAlpha)
         
