@@ -20,10 +20,19 @@ class Game(ShowBase):
         self.speed_max_increase_rate = 0.0002  # per second
         self.game_start_time = time.time()
 
-        self.num_enemies = 10  # Start with 3 enemies
+        # Initialize enemy-related variables first
+        self.num_enemies = 10  # Start with 10 enemies
+        self.enemy_limit = self.num_enemies  # Track max allowed enemies separately
         self.base_num_enemies = 10  # Store the initial number
-        self.enemies_per_score = 10  # Increase enemies every 3 points
+        self.enemies_per_score = 8  # Increase enemies every 10 points
         self.previous_enemy_increase = 0  # Track when we last increased enemies
+
+        # Add orb-related variables
+        self.green_orb = None
+        self.orb_spawn_time = None
+        self.orb_duration = 2.0  # 3 seconds
+        self.orb_points_interval = 10  # Spawn orb every 10 points
+        self.last_orb_spawn_score = 0
 
         self.score = 0
         self.score_text = OnscreenText(
@@ -369,18 +378,23 @@ class Game(ShowBase):
                     self.create_explosion(enemy_pos[0], enemy_pos[2])
                     self.score += 1
                     self.score_text.setText(f"Score: {self.score}")
-                    self.check_difficulty_increase()  # Add this line
+                    self.check_difficulty_increase()
                     self.enemy_data.pop(enemy)
                     enemy.removeNode()
                     projectile.removeNode()
                     self.enemies.remove(enemy)
                     self.enemy_death_sound.play()
                     self.projectiles.remove(projectile)
-                    self.spawn_single_enemy()
+                    # Only spawn new enemy if we're below the current enemy limit
+                    if len(self.enemies) < self.enemy_limit:
+                        self.spawn_single_enemy()
                     break
         
         # Update explosions
         self.update_explosions(task)
+
+        self.update_orb()
+        self.check_orb_collection()
         
         return Task.cont
 
@@ -582,6 +596,12 @@ class Game(ShowBase):
         self.pause_text.hide()
         self.paused = False
 
+        self.enemy_limit = self.base_num_enemies
+        if self.green_orb:
+            self.green_orb.removeNode()
+            self.green_orb = None
+        self.last_orb_spawn_score = 0
+
         # Reset speed-related variables
         self.game_start_time = time.time()
         
@@ -621,3 +641,105 @@ class Game(ShowBase):
             
             # Spawn the additional enemy
             self.spawn_single_enemy()
+
+    def create_green_orb(self):
+        if self.green_orb:  # Remove existing orb if there is one
+            self.green_orb.removeNode()
+            
+        cm = CardMaker("green_orb")
+        orb_size = 0.05
+        cm.setFrame(-orb_size, orb_size, -orb_size, orb_size)
+        self.green_orb = self.render2d.attachNewNode(cm.generate())
+        
+        # Create a more vibrant green glowing texture
+        texture_size = 128  # Increased texture size for better quality
+        image = PNMImage(texture_size, texture_size, 4)
+        center_x = texture_size // 2
+        center_y = texture_size // 2
+        radius = texture_size // 2
+        
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                if distance <= radius:
+                    intensity = 1.0 - (distance / radius)
+                    # Make the glow effect stronger
+                    intensity = intensity ** 0.5  # This makes the falloff less steep
+                    
+                    # Bright core
+                    if distance < radius * 0.3:
+                        # White-green center
+                        image.setXel(x, y, 0.8, 1.0, 0.8)
+                        image.setAlpha(x, y, 1.0)
+                    else:
+                        # Vibrant green glow
+                        image.setXel(x, y, 0.2, 1.0, 0.2)
+                        image.setAlpha(x, y, min(1.0, intensity * 1.5))  # Increased alpha
+                else:
+                    image.setAlpha(x, y, 0)
+        
+        texture = Texture()
+        texture.load(image)
+        self.green_orb.setTexture(texture)
+        self.green_orb.setTransparency(TransparencyAttrib.MAlpha)
+        
+        # Make it render on top of other elements
+        self.green_orb.setBin('fixed', 100)
+        self.green_orb.setDepthTest(False)
+        self.green_orb.setDepthWrite(False)
+        
+        # Random position within visible bounds, now 10% more constrained
+        x = random.uniform(-self.aspect_ratio * 0.9 + 0.1, self.aspect_ratio * 0.9 - 0.1)
+        y = random.uniform(-0.8, 0.8)  # Changed from -0.9, 0.9 to -0.8, 0.8
+        self.green_orb.setPos(x, 0, y)
+        
+        self.orb_spawn_time = time.time()
+        
+        # Add pulsing effect
+        self.orb_scale = 1.0
+        taskMgr.add(self.pulse_orb, "pulseOrb")
+
+    def pulse_orb(self, task):
+        if not self.green_orb:
+            return Task.done
+        
+        pulse_speed = 3.0  # Adjust this to change pulse speed
+        pulse_magnitude = 0.2  # Adjust this to change pulse size
+        
+        # Calculate scale based on sine wave
+        base_scale = 1.0
+        pulse = math.sin(task.time * pulse_speed) * pulse_magnitude
+        new_scale = base_scale + pulse
+        
+        self.green_orb.setScale(new_scale)
+        
+        return Task.cont
+
+    def check_orb_collection(self):
+        if not self.green_orb:
+            return
+            
+        orb_pos = self.green_orb.getPos()
+        if (abs(self.player_pos[0] - orb_pos[0]) < 0.1 and 
+            abs(self.player_pos[1] - orb_pos[2]) < 0.1):
+            # Collected the orb
+            if self.enemy_limit > 1:  # Don't go below 1 enemy
+                self.enemy_limit -= 1
+            self.green_orb.removeNode()
+            self.green_orb = None
+
+    def update_orb(self):
+        current_time = time.time()
+        
+        # Check if we should spawn a new orb
+        if self.score > 0 and self.score % self.orb_points_interval == 0 and self.score != self.last_orb_spawn_score:
+            self.create_green_orb()
+            self.last_orb_spawn_score = self.score
+        
+        # Remove orb if it's been there too long
+        if self.green_orb and self.orb_spawn_time:
+            if current_time - self.orb_spawn_time > self.orb_duration:
+                self.green_orb.removeNode()
+                self.green_orb = None
