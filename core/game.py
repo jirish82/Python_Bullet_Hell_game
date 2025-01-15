@@ -12,6 +12,10 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.num_enemies = 3  # Start with 3 enemies
+        self.base_num_enemies = 3  # Store the initial number
+        self.enemies_per_score = 3  # Increase enemies every 3 points
+        self.previous_enemy_increase = 0  # Track when we last increased enemies
 
         self.score = 0
         self.score_text = OnscreenText(
@@ -357,6 +361,7 @@ class Game(ShowBase):
                     self.create_explosion(enemy_pos[0], enemy_pos[2])
                     self.score += 1
                     self.score_text.setText(f"Score: {self.score}")
+                    self.check_difficulty_increase()  # Add this line
                     self.enemy_data.pop(enemy)
                     enemy.removeNode()
                     projectile.removeNode()
@@ -406,29 +411,32 @@ class Game(ShowBase):
     def spawn_single_enemy(self):
         side = random.choice(['top', 'bottom', 'left', 'right'])
         enemy_size = 0.05
-        
+        buffer = 0.1  # Small buffer distance outside the screen
+
+        # Calculate spawn position based on side
         if side == 'top':
             x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = 1 - enemy_size
+            y = 1 + buffer  # Just above the visible screen
         elif side == 'bottom':
             x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = -1 + enemy_size
+            y = -1 - buffer  # Just below the visible screen
         elif side == 'left':
-            x = -self.aspect_ratio + enemy_size
+            x = -self.aspect_ratio - buffer  # Just left of the visible screen
             y = random.uniform(-1 + enemy_size, 1 - enemy_size)
         else:  # right
-            x = self.aspect_ratio - enemy_size
+            x = self.aspect_ratio + buffer  # Just right of the visible screen
             y = random.uniform(-1 + enemy_size, 1 - enemy_size)
-        
+
+        # Create the enemy
         cm = CardMaker("enemy")
         cm.setFrame(-enemy_size, enemy_size, -enemy_size, enemy_size)
         enemy = self.render2d.attachNewNode(cm.generate())
-        
         enemy_tex = self.loader.loadTexture(get_resource_path("enemy.png"))
         enemy.setTexture(enemy_tex)
         enemy.setTransparency(TransparencyAttrib.MAlpha)
-        
         enemy.setPos(x, 0, y)
+        
+        # Set random speed for the enemy
         self.enemy_data[enemy] = random.uniform(0.3 * self.max_enemy_speed, self.max_enemy_speed)
         self.enemies.append(enemy)
 
@@ -538,9 +546,11 @@ class Game(ShowBase):
         self.game_over_text.hide()
         self.pause_text.hide()
         self.paused = False
-
-        # Reset score
+        
+        # Reset score and difficulty
         self.score = 0
+        self.num_enemies = self.base_num_enemies  # Reset to initial number of enemies
+        self.previous_enemy_increase = 0  # Reset difficulty tracking
         self.score_text.setText(f"Score: {self.score}")
         
         # Reset player position
@@ -557,9 +567,17 @@ class Game(ShowBase):
             projectile.removeNode()
         self.projectiles.clear()
         
-        # Respawn enemies
+        # Respawn initial enemies
         self.spawn_enemies()
         
         # Restart music if it exists
         if hasattr(self, 'music') and self.music:
             self.music.play()
+
+    def check_difficulty_increase(self):
+        enemy_increase_threshold = self.score // self.enemies_per_score
+        if enemy_increase_threshold > self.previous_enemy_increase:
+            self.num_enemies += 1
+            self.previous_enemy_increase = enemy_increase_threshold
+            # Spawn the additional enemy
+            self.spawn_single_enemy()
