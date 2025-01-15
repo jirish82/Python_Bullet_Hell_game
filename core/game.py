@@ -1,7 +1,7 @@
 from direct.showbase.ShowBase import ShowBase
 from direct.gui.OnscreenText import OnscreenText
 from direct.task import Task
-from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture
+from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture, TextNode
 from panda3d.core import WindowProperties, InputDevice
 import math
 import random
@@ -11,6 +11,17 @@ from utils.resource_loader import get_resource_path
 class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
+
+
+        self.score = 0
+        self.score_text = OnscreenText(
+            text="Score: 0",
+            pos=(-0.9, 0.9),  # Top left corner
+            scale=0.07,
+            fg=(1, 1, 1, 1),
+            align=TextNode.ALeft,
+            shadow=(0, 0, 0, 1)
+        )
 
         self.game_over = False
         self.game_over_text = OnscreenText(
@@ -344,8 +355,8 @@ class Game(ShowBase):
                 if (abs(proj_pos[0] - enemy_pos[0]) < 0.07 and 
                     abs(proj_pos[2] - enemy_pos[2]) < 0.07):
                     self.create_explosion(enemy_pos[0], enemy_pos[2])
-                    print("Hit detected!")
-                    
+                    self.score += 1
+                    self.score_text.setText(f"Score: {self.score}")
                     self.enemy_data.pop(enemy)
                     enemy.removeNode()
                     projectile.removeNode()
@@ -527,6 +538,10 @@ class Game(ShowBase):
         self.game_over_text.hide()
         self.pause_text.hide()
         self.paused = False
+
+        # Reset score
+        self.score = 0
+        self.score_text.setText(f"Score: {self.score}")
         
         # Reset player position
         self.player_pos = [0, 0]
