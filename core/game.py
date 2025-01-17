@@ -141,7 +141,7 @@ class Game(ShowBase):
             self.music = self.loader.loadSfx(get_resource_path("music.mp3"))
             if self.music:
                 self.music.setLoop(True)
-                self.music.setVolume(0.8)
+                self.music.setVolume(0.1)
                 self.music.play()
                 self.music_playing = True
                 self.music_paused = False
@@ -149,7 +149,9 @@ class Game(ShowBase):
 
                 # Add these after your music setup
                 self.enemy_death_sound = self.loader.loadSfx(get_resource_path("enemy_death.mp3"))
+                self.enemy_death_sound.setVolume(0.3)  # Add this line
                 self.gun_sound = self.loader.loadSfx(get_resource_path("gun.mp3"))
+                self.gun_sound.setVolume(0.3)  # Add this line
             else:
                 print("Could not load music file")
                 self.music_playing = False
@@ -247,7 +249,7 @@ class Game(ShowBase):
                 self.music.setVolume(0)
                 self.music_playing = False
             else:
-                self.music.setVolume(0.8)
+                self.music.setVolume(0.5)
                 self.music_playing = True
             
     def togglePause(self):
