@@ -2,6 +2,7 @@ import os
 import sys
 from pathlib import Path
 from panda3d.core import loadPrcFileData
+from utils.debug import out
 
 def get_resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
@@ -35,9 +36,9 @@ def get_resource_path(relative_path):
     if ':' in unix_path:
         unix_path = unix_path[unix_path.index(':') + 1:]
     
-    print(f"Looking for resource: {relative_path}")
-    print(f"Converted path: {unix_path}")
-    print(f"File exists: {full_path.exists()}")
+    out(f"Looking for resource: {relative_path}")
+    out(f"Converted path: {unix_path}")
+    out(f"File exists: {full_path.exists()}")
     
     return unix_path
 

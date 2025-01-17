@@ -6,12 +6,21 @@ from panda3d.core import WindowProperties, InputDevice
 import math
 import random
 from utils.resource_loader import get_resource_path
+from utils.debug import out
 import time
 
 
 class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
+
+        # Add dash mechanics
+        self.dash_cooldown = 0.5  # Time between dashes
+        self.last_dash_time = 0
+        self.dash_distance = 0.6  # 30% of screen width (remember aspect ratio)
+        self.is_dashing = False
+        self.dash_duration = 0.1  # How long the dash lasts
+        self.dash_start_time = 0
 
         # Add these new speed-related variables
         self.speed_base_min = 0.001
@@ -72,7 +81,7 @@ class Game(ShowBase):
         
         # Debug print for all inputs
         def print_button(button):
-            print(f"Button pressed: {button}")
+            out(f"Button pressed: {button}", 2)
         self.accept("*", print_button)
 
         self.pause_text = OnscreenText(
@@ -153,11 +162,11 @@ class Game(ShowBase):
                 self.gun_sound = self.loader.loadSfx(get_resource_path("gun.mp3"))
                 self.gun_sound.setVolume(0.3)  # Add this line
             else:
-                print("Could not load music file")
+                out("Could not load music file")
                 self.music_playing = False
                 self.music_paused = False
         except Exception as e:
-            print(f"Error loading music: {e}")
+            out(f"Error loading music: {e}")
             self.music_playing = False
             self.music_paused = False
 
@@ -234,14 +243,27 @@ class Game(ShowBase):
         if devices:
             self.gamepad = devices[0]
             self.attachInputDevice(self.gamepad, prefix="gamepad")
-            print("Gamepad connected:", self.gamepad.name)
+            out(f"Gamepad connected: {self.gamepad.name}", 2)
             
             # Set up gamepad button handlers
             self.accept("gamepad-face_a", self.toggleMusic)
             self.accept("gamepad-face_b", self.togglePause)
             self.accept("gamepad-face_y", self.toggleFullscreen)
+
+            # Try multiple possible shoulder button names
+            possible_buttons = [
+                "gamepad-right_shoulder",
+                "gamepad-rshoulder",
+                "gamepad-r1",
+                "gamepad-shoulder_right",
+                "gamepad-rtrigger"
+            ]
+            
+            for button in possible_buttons:
+                out(f"Attempting to bind to button: {button}", 2)
+                self.accept(button, self.debug_button)
         else:
-            print("No gamepad detected")
+            out("No gamepad detected", 2)
         
     def toggleMusic(self):
         if hasattr(self, 'music') and self.music:
@@ -340,6 +362,16 @@ class Game(ShowBase):
                 self.createProjectile(direction_x, direction_y)
                 self.gun_sound.play()
                 self.last_fire_time = current_time
+
+            # Handle dash with right shoulder button
+            right_shoulder = self.gamepad.findButton("right_shoulder")
+            if right_shoulder:
+                out(f"Update method - Right shoulder button state: {right_shoulder.pressed}", 2)
+                if right_shoulder.pressed:
+                    right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
+                    right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
+                    out(f"Update method - Dash triggered with stick values: {right_x}, {right_y}", 2)
+                    self.perform_dash(right_x, right_y)
 
         # Update projectiles
         for projectile in self.projectiles[:]:
@@ -878,3 +910,80 @@ class Game(ShowBase):
         )
         
         self.debug_text.setText(debug_str)
+
+    def perform_dash(self, direction_x, direction_y):
+        current_time = time.time()
+        out(f"Dash attempt - direction: ({direction_x}, {direction_y})", 2)
+        
+        if current_time - self.last_dash_time < self.dash_cooldown:
+            out("Dash blocked by cooldown", 2)
+            return
+                
+        # Normalize direction
+        magnitude = math.sqrt(direction_x * direction_x + direction_y * direction_y)
+        if magnitude < 0.2:  # Don't dash if stick barely moved
+            out("Dash blocked by small stick movement", 2)
+            return
+                
+        direction_x /= magnitude
+        direction_y /= magnitude
+        
+        # Calculate dash end position
+        target_x = self.player_pos[0] + direction_x * self.dash_distance
+        target_y = self.player_pos[1] + direction_y * self.dash_distance
+        
+        out(f"Dash executing - from: ({self.player_pos[0]}, {self.player_pos[1]}) to: ({target_x}, {target_y})", 2)
+        
+        # Clamp to screen bounds
+        target_x = max(-self.aspect_ratio + 0.05, min(self.aspect_ratio - 0.05, target_x))
+        target_y = max(-0.95, min(0.95, target_y))
+        
+        # Check for enemies in dash path
+        dash_vector_x = target_x - self.player_pos[0]
+        dash_vector_y = target_y - self.player_pos[1]
+        
+        # Check each enemy for intersection with dash path
+        for enemy in self.enemies[:]:
+            enemy_pos = enemy.getPos()
+            # Calculate point-line distance
+            px = enemy_pos[0] - self.player_pos[0]
+            py = enemy_pos[2] - self.player_pos[1]
+            
+            # Project point onto dash line
+            t = max(0, min(1, (px * dash_vector_x + py * dash_vector_y) / 
+                (dash_vector_x * dash_vector_x + dash_vector_y * dash_vector_y)))
+            
+            # Find closest point on dash line
+            closest_x = self.player_pos[0] + t * dash_vector_x
+            closest_y = self.player_pos[1] + t * dash_vector_y
+            
+            # Check if enemy is close enough to dash path
+            dist = math.sqrt((enemy_pos[0] - closest_x)**2 + (enemy_pos[2] - closest_y)**2)
+            if dist < 0.1:  # Collision threshold
+                self.create_explosion(enemy_pos[0], enemy_pos[2])
+                self.score += 1
+                self.score_text.setText(f"Score: {self.score}")
+                self.check_difficulty_increase()
+                self.enemy_data.pop(enemy)
+                enemy.removeNode()
+                self.enemies.remove(enemy)
+                self.enemy_death_sound.play()
+                if len(self.enemies) < self.enemy_limit:
+                    self.spawn_single_enemy()
+        
+        # Perform the dash
+        self.player_pos[0] = target_x
+        self.player_pos[1] = target_y
+        self.player.setPos(target_x, 0, target_y)
+        
+        self.last_dash_time = current_time
+
+    def debug_button(self):
+        out("Shoulder button pressed!", 2)
+        if self.gamepad:
+            right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
+            right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
+            out(f"Right stick position: {right_x}, {right_y}", 2)
+            self.perform_dash(right_x, right_y)
+
+
