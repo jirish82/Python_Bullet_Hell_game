@@ -556,8 +556,9 @@ class Game(ShowBase):
         self.enemy_data[enemy] = speed
         self.enemies.append(enemy)
 
-    def create_explosion(self, pos_x, pos_y):
-        explosion_size = 0.2
+    def create_explosion(self, pos_x, pos_y, is_aoe=False):
+        # Make AoE explosions larger
+        explosion_size = 0.3 if is_aoe else 0.2
         cm = CardMaker("explosion")
         cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
         explosion = self.render2d.attachNewNode(cm.generate())
@@ -571,6 +572,7 @@ class Game(ShowBase):
         image.fill(0, 0, 0)
         image.alphaFill(0)
         
+        # Use different colors for AoE explosions
         for x in range(texture_size):
             for y in range(texture_size):
                 dx = x - center_x
@@ -581,12 +583,22 @@ class Game(ShowBase):
                     noise = random.uniform(0.8, 1.0)
                     intensity = intensity * noise
                     
-                    if distance < radius * 0.3:
-                        image.setXel(x, y, 1.0, 1.0, 0.7)
-                    elif distance < radius * 0.6:
-                        image.setXel(x, y, 1.0, 0.5, 0.0)
+                    if is_aoe:
+                        # Blue-white explosion for AoE
+                        if distance < radius * 0.3:
+                            image.setXel(x, y, 0.9, 0.95, 1.0)  # White-blue core
+                        elif distance < radius * 0.6:
+                            image.setXel(x, y, 0.4, 0.6, 1.0)  # Bright blue
+                        else:
+                            image.setXel(x, y, 0.2, 0.4, 0.8)  # Darker blue
                     else:
-                        image.setXel(x, y, 1.0, 0.2, 0.0)
+                        # Original orange explosion for dash hits
+                        if distance < radius * 0.3:
+                            image.setXel(x, y, 1.0, 1.0, 0.7)
+                        elif distance < radius * 0.6:
+                            image.setXel(x, y, 1.0, 0.5, 0.0)
+                        else:
+                            image.setXel(x, y, 1.0, 0.2, 0.0)
                     
                     if distance > radius * 0.7:
                         edge_factor = 1.0 - ((distance - radius * 0.7) / (radius * 0.3))
@@ -612,7 +624,8 @@ class Game(ShowBase):
             'pos_x': pos_x,
             'pos_y': pos_y,
             'rotation_speed': random.uniform(-180, 180),
-            'initial_rotation': initial_rotation
+            'initial_rotation': initial_rotation,
+            'is_aoe': is_aoe
         }
         
         self.explosions.append(explosion)
@@ -630,6 +643,7 @@ class Game(ShowBase):
             data = self.explosion_data[explosion]
             start_time = data['start_time']
             age = current_time - start_time
+            is_aoe = data.get('is_aoe', False)
             
             if age > self.explosion_duration:
                 explosion.removeNode()
@@ -639,7 +653,10 @@ class Game(ShowBase):
             
             progress = age / self.explosion_duration
             scale_factor = math.sin(progress * math.pi) * 0.5 + 0.5
-            current_size = 0.3 + (0.6 * scale_factor)
+            # Larger scale for AoE explosions
+            base_size = 0.4 if is_aoe else 0.3
+            max_size = 0.8 if is_aoe else 0.6
+            current_size = base_size + (max_size * scale_factor)
             explosion.setScale(current_size)
             
             rotation = data['initial_rotation'] + (data['rotation_speed'] * age)
@@ -1050,28 +1067,49 @@ class Game(ShowBase):
         dash_vector_x = self.dash_target_pos[0] - self.dash_start_pos[0]
         dash_vector_y = self.dash_target_pos[1] - self.dash_start_pos[1]
         
-        # Check each enemy for intersection with dash path
+        # Define AoE radius (5% of screen width)
+        aoe_radius = self.aspect_ratio * 0.20
+        
+        # Check each enemy for intersection with dash path or destination AoE
         for enemy in self.enemies[:]:
             enemy_pos = enemy.getPos()
             
-            # Calculate the closest point on the dash line to the enemy
+            # First check dash destination AoE
+            dist_to_destination = math.sqrt(
+                (enemy_pos[0] - self.dash_target_pos[0])**2 + 
+                (enemy_pos[2] - self.dash_target_pos[1])**2
+            )
+            
+            # If enemy is within AoE radius of destination or along dash path, destroy it
+            if dist_to_destination <= aoe_radius:
+                # Create a bigger explosion for AoE kills
+                self.create_explosion(enemy_pos[0], enemy_pos[2], is_aoe=True)
+                self.score += 1
+                self.score_text.setText(f"Score: {self.score}")
+                self.check_difficulty_increase()
+                self.enemy_data.pop(enemy)
+                enemy.removeNode()
+                self.enemies.remove(enemy)
+                self.enemy_death_sound.play()
+                if len(self.enemies) < self.enemy_limit:
+                    self.spawn_single_enemy()
+                continue
+            
+            # Then check dash path collision as before
             px = enemy_pos[0] - self.dash_start_pos[0]
             py = enemy_pos[2] - self.dash_start_pos[1]
             
-            # Project enemy position onto dash vector
             dash_length_squared = dash_vector_x * dash_vector_x + dash_vector_y * dash_vector_y
             if dash_length_squared == 0:
                 continue
                 
             t = max(0, min(1, (px * dash_vector_x + py * dash_vector_y) / dash_length_squared))
             
-            # Calculate closest point on dash line
             closest_x = self.dash_start_pos[0] + t * dash_vector_x
             closest_y = self.dash_start_pos[1] + t * dash_vector_y
             
-            # Check distance to closest point
             dist = math.sqrt((enemy_pos[0] - closest_x)**2 + (enemy_pos[2] - closest_y)**2)
-            if dist < 0.1:  # Collision threshold
+            if dist < 0.1:  # Regular dash collision threshold
                 self.create_explosion(enemy_pos[0], enemy_pos[2])
                 self.score += 1
                 self.score_text.setText(f"Score: {self.score}")
