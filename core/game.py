@@ -14,6 +14,12 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.dash_trail_particles = []
+        self.dash_arc = None
+        self.dash_glow = None
+        self.trail_lifetime = 0.4  # Increased from 0.3
+        self.max_trail_particles = 15  # Increased from 10
+
         self.dash_cooldown = 0.5  # Time between dashes
         self.last_dash_time = 0
         self.dash_distance = 0.6  # 30% of screen width
@@ -954,49 +960,117 @@ class Game(ShowBase):
         self.dash_start_time = current_time
         self.last_dash_time = current_time
 
+        # Create initial visual effects
+        if not self.dash_arc:
+            self.create_dash_visuals()
+        
+        # Calculate angle for the arc
+        angle = math.atan2(direction_y, direction_x)
+        self.dash_arc.setR(-math.degrees(angle) - 45)  # -45 to align the quarter circle
+        self.dash_arc.setPos(self.player_pos[0], 0, self.player_pos[1])
+        self.dash_arc.show()
+        
+        self.dash_glow.setPos(self.player_pos[0], 0, self.player_pos[1])
+        self.dash_glow.show()
+
     def update_dash(self, task):
         if not self.is_dashing:
             return
-            
+                
         current_time = time.time()
         progress = (current_time - self.dash_start_time) / self.dash_duration
         
         if progress >= 1.0:
             # Dash complete
+            self.is_dashing = False
             self.player_pos[0] = self.dash_target_pos[0]
             self.player_pos[1] = self.dash_target_pos[1]
             self.player.setPos(self.dash_target_pos[0], 0, self.dash_target_pos[1])
-            self.is_dashing = False
-            self.check_dash_collision()
+            
+            # Clean up visual effects
+            self.dash_arc.hide()
+            self.dash_glow.hide()
+            
+            # Clean up trail particles
+            for particle in self.dash_trail_particles[:]:
+                particle['node'].removeNode()
+            self.dash_trail_particles.clear()
+            
             return
         
-        # Smooth easing function (ease-out quad)
-        t = 1 - (1 - progress) * (1 - progress)
+        # Update dash visuals
+        t = 1 - (1 - progress) * (1 - progress)  # Quadratic ease-out
         
-        # Interpolate position
-        self.player_pos[0] = self.dash_start_pos[0] + (self.dash_target_pos[0] - self.dash_start_pos[0]) * t
-        self.player_pos[1] = self.dash_start_pos[1] + (self.dash_target_pos[1] - self.dash_start_pos[1]) * t
-        self.player.setPos(self.player_pos[0], 0, self.player_pos[1])
+        # Update player position
+        new_x = self.dash_start_pos[0] + (self.dash_target_pos[0] - self.dash_start_pos[0]) * t
+        new_y = self.dash_start_pos[1] + (self.dash_target_pos[1] - self.dash_start_pos[1]) * t
         
-        # Check for enemy collisions during dash
+        # Create trail particles
+        if len(self.dash_trail_particles) < self.max_trail_particles:
+            particle = self.create_trail_particle()
+            particle.setPos(self.player_pos[0], 0, self.player_pos[1])
+            self.dash_trail_particles.append({
+                'node': particle,
+                'spawn_time': current_time,
+                'position': (self.player_pos[0], self.player_pos[1])
+            })
+        
+        # Update existing trail particles
+        for particle in self.dash_trail_particles[:]:
+            age = current_time - particle['spawn_time']
+            if age > self.trail_lifetime:
+                particle['node'].removeNode()
+                self.dash_trail_particles.remove(particle)
+            else:
+                # Fade out particle
+                fade = 1.0 - (age / self.trail_lifetime)
+                particle['node'].setColorScale(1, 1, 1, fade)
+        
+        # Update arc and glow
+        self.dash_arc.setPos(new_x, 0, new_y)
+        self.dash_glow.setPos(new_x, 0, new_y)
+        
+        # Fade arc and glow based on progress
+        fade = 1.0 - progress
+        self.dash_arc.setColorScale(1, 1, 1, fade)
+        self.dash_glow.setColorScale(1, 1, 1, fade * 0.7)
+        
+        # Update player position
+        self.player_pos[0] = new_x
+        self.player_pos[1] = new_y
+        self.player.setPos(new_x, 0, new_y)
+
+        # Check for enemy collisions - this is the important addition
         self.check_dash_collision()
 
     def check_dash_collision(self):
         if not self.is_dashing:
             return
-            
+                
         dash_vector_x = self.dash_target_pos[0] - self.dash_start_pos[0]
         dash_vector_y = self.dash_target_pos[1] - self.dash_start_pos[1]
         
         # Check each enemy for intersection with dash path
         for enemy in self.enemies[:]:
             enemy_pos = enemy.getPos()
-            # Calculate point-line distance
-            px = enemy_pos[0] - self.player_pos[0]
-            py = enemy_pos[2] - self.player_pos[1]
             
-            # Check if enemy is close enough to current position
-            dist = math.sqrt(px * px + py * py)
+            # Calculate the closest point on the dash line to the enemy
+            px = enemy_pos[0] - self.dash_start_pos[0]
+            py = enemy_pos[2] - self.dash_start_pos[1]
+            
+            # Project enemy position onto dash vector
+            dash_length_squared = dash_vector_x * dash_vector_x + dash_vector_y * dash_vector_y
+            if dash_length_squared == 0:
+                continue
+                
+            t = max(0, min(1, (px * dash_vector_x + py * dash_vector_y) / dash_length_squared))
+            
+            # Calculate closest point on dash line
+            closest_x = self.dash_start_pos[0] + t * dash_vector_x
+            closest_y = self.dash_start_pos[1] + t * dash_vector_y
+            
+            # Check distance to closest point
+            dist = math.sqrt((enemy_pos[0] - closest_x)**2 + (enemy_pos[2] - closest_y)**2)
             if dist < 0.1:  # Collision threshold
                 self.create_explosion(enemy_pos[0], enemy_pos[2])
                 self.score += 1
@@ -1017,4 +1091,109 @@ class Game(ShowBase):
             out(f"Left stick position: {right_x}, {right_y}", 2)
             self.perform_dash(right_x, right_y)
 
+    def create_dash_visuals(self):
+        # Increase arc size
+        arc_size = 0.15  # Increased from 0.1
+        cm = CardMaker("dash_arc")
+        cm.setFrame(-arc_size, arc_size, -arc_size, arc_size)
+        self.dash_arc = self.render2d.attachNewNode(cm.generate())
+        
+        # Create arc texture with stronger glow
+        texture_size = 128
+        arc_image = PNMImage(texture_size, texture_size, 4)
+        center_x = texture_size // 2
+        center_y = texture_size // 2
+        radius = texture_size // 2
+        
+        # Draw 1/4 circle arc with stronger glow
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                angle = math.atan2(dy, dx)
+                
+                if distance <= radius and 0 <= angle <= math.pi/2:
+                    intensity = 1.0 - (distance / radius)
+                    intensity = intensity ** 0.3  # Less falloff for stronger glow
+                    
+                    # Brighter core with blue tint
+                    arc_image.setXel(x, y, 0.9, 0.95, 1.0)
+                    arc_image.setAlpha(x, y, intensity)
+                else:
+                    arc_image.setAlpha(x, y, 0)
 
+        arc_texture = Texture()
+        arc_texture.load(arc_image)
+        self.dash_arc.setTexture(arc_texture)
+        self.dash_arc.setTransparency(TransparencyAttrib.MAlpha)
+        self.dash_arc.setBin('fixed', 100)
+        self.dash_arc.hide()
+
+        # Create larger dash glow effect
+        glow_size = 0.2  # Increased from 0.15
+        cm = CardMaker("dash_glow")
+        cm.setFrame(-glow_size, glow_size, -glow_size, glow_size)
+        self.dash_glow = self.render2d.attachNewNode(cm.generate())
+        
+        # Create brighter glow texture
+        glow_image = PNMImage(texture_size, texture_size, 4)
+        
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                if distance <= radius:
+                    intensity = 1.0 - (distance / radius)
+                    intensity = intensity ** 1.5  # Adjusted for better falloff
+                    
+                    # Brighter blue tint
+                    glow_image.setXel(x, y, 0.8, 0.9, 1.0)
+                    glow_image.setAlpha(x, y, intensity * 0.9)  # More opacity
+                else:
+                    glow_image.setAlpha(x, y, 0)
+        
+        glow_texture = Texture()
+        glow_texture.load(glow_image)
+        self.dash_glow.setTexture(glow_texture)
+        self.dash_glow.setTransparency(TransparencyAttrib.MAlpha)
+        self.dash_glow.setBin('fixed', 99)
+        self.dash_glow.hide()
+
+    def create_trail_particle(self):
+        particle_size = 0.04  # Increased from 0.03
+        cm = CardMaker("trail_particle")
+        cm.setFrame(-particle_size, particle_size, -particle_size, particle_size)
+        particle = self.render2d.attachNewNode(cm.generate())
+        
+        texture_size = 64
+        particle_image = PNMImage(texture_size, texture_size, 4)
+        center_x = texture_size // 2
+        center_y = texture_size // 2
+        radius = texture_size // 2
+        
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                if distance <= radius:
+                    intensity = 1.0 - (distance / radius)
+                    intensity = intensity ** 0.5  # Less falloff for stronger particles
+                    
+                    # Brighter blue color
+                    particle_image.setXel(x, y, 0.7, 0.85, 1.0)
+                    particle_image.setAlpha(x, y, intensity * 0.8)  # More opacity
+                else:
+                    particle_image.setAlpha(x, y, 0)
+        
+        particle_texture = Texture()
+        particle_texture.load(particle_image)
+        particle.setTexture(particle_texture)
+        particle.setTransparency(TransparencyAttrib.MAlpha)
+        particle.setBin('fixed', 98)
+        
+        return particle
