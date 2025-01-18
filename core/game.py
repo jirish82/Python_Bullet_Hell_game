@@ -167,7 +167,7 @@ class Game(ShowBase):
             self.music = self.loader.loadSfx(get_resource_path("music.mp3"))
             if self.music:
                 self.music.setLoop(True)
-                self.music.setVolume(0.05)
+                self.music.setVolume(0.1)
                 self.music.play()
                 self.music_playing = True
                 self.music_paused = False
@@ -175,9 +175,9 @@ class Game(ShowBase):
 
                 # Add these after your music setup
                 self.enemy_death_sound = self.loader.loadSfx(get_resource_path("enemy_death.mp3"))
-                self.enemy_death_sound.setVolume(0.1)  # Add this line
+                self.enemy_death_sound.setVolume(0.2)
                 self.gun_sound = self.loader.loadSfx(get_resource_path("gun.mp3"))
-                self.gun_sound.setVolume(0.1)  # Add this line
+                self.gun_sound.setVolume(0.03)
             else:
                 out("Could not load music file")
                 self.music_playing = False
@@ -193,6 +193,13 @@ class Game(ShowBase):
         except Exception as e:
             out(f"Error loading dash ready sound: {e}")
             self.dash_ready_sound = None
+
+        try:
+            self.dash_sound = self.loader.loadSfx(get_resource_path("zoom.mp3"))
+            self.dash_sound.setVolume(0.8)  # Adjust volume as needed
+        except Exception as e:
+            out(f"Error loading dash sound: {e}")
+            self.dash_sound = None
 
         # Load and set up the background
         # Replace the current background setup code with:
@@ -999,6 +1006,11 @@ class Game(ShowBase):
         self.debug_text.setText(debug_str)
 
     def perform_dash(self, direction_x, direction_y):
+
+        # Play dash sound
+        if hasattr(self, 'dash_sound') and self.dash_sound:
+            self.dash_sound.play()
+
         current_time = time.time()
         out(f"Dash attempt - direction: ({direction_x}, {direction_y})", 2)
         
