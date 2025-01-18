@@ -26,7 +26,7 @@ class Game(ShowBase):
         self.trail_lifetime = 0.4  # Increased from 0.3
         self.max_trail_particles = 15  # Increased from 10
 
-        self.dash_cooldown = 0.5  # Time between dashes
+        self.dash_cooldown = 10  # Time between dashes
         self.last_dash_time = 0
         self.dash_distance = 0.6  # 30% of screen width
         self.is_dashing = False
@@ -184,21 +184,25 @@ class Game(ShowBase):
             self.music_paused = False
 
         # Load and set up the background
+        # Replace the current background setup code with:
         self.background = self.loader.loadTexture(get_resource_path("map.png"))
         cm = CardMaker("background")
-        cm.setFrame(-self.aspect_ratio, self.aspect_ratio, -1, 1)
+        # Use larger values to show more of the background
+        cm.setFrame(-self.aspect_ratio * 0.58, self.aspect_ratio * 0.8, -1, 1)
         self.background_node = self.render2d.attachNewNode(cm.generate())
         self.background_node.setTexture(self.background)
         
         # Load and set up the player sprite
         cm = CardMaker("player")
-        player_size = 0.05
-        aspect_adjusted_size = player_size * self.aspect_ratio
+        player_size = 0.035
         cm.setFrame(-player_size, player_size, -player_size, player_size)
         self.player = self.render2d.attachNewNode(cm.generate())
         player_tex = self.loader.loadTexture(get_resource_path("player.png"))
         self.player.setTexture(player_tex)
         self.player.setTransparency(TransparencyAttrib.MAlpha)
+
+        # Scale the player sprite based on the aspect ratio
+        self.player.setScale(self.aspect_ratio, 1, 2.5)  # Scale width by aspect ratio
         
         # Initialize player position and movement
         self.player_pos = [0, 0]
@@ -515,7 +519,7 @@ class Game(ShowBase):
     def spawn_enemies(self):
         for _ in range(self.num_enemies):
             side = random.choice(['top', 'bottom', 'left', 'right'])
-            enemy_size = 0.05
+            enemy_size = 0.1
             buffer = 0.1  # Small buffer distance outside the screen
 
             # Calculate spawn position based on side
@@ -553,7 +557,7 @@ class Game(ShowBase):
 
     def spawn_single_enemy(self):
         side = random.choice(['top', 'bottom', 'left', 'right'])
-        enemy_size = 0.05
+        enemy_size = 0.1
         buffer = 0.1  # Small buffer distance outside the screen
 
         # Calculate spawn position based on side
