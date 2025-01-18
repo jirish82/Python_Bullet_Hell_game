@@ -14,6 +14,16 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.actual_game_time = 0
+        self.last_time_update = time.time()
+
+        #boss
+        self.boss = None
+        self.boss_health = 0
+        self.boss_spawn_time = 5  # Seconds before boss spawns
+        self.boss_hits_required = 5
+        self.boss_speed_multiplier = 1.5
+
         #dash indicator
         self.dash_indicator = None
         self.create_dash_indicator()
@@ -331,11 +341,25 @@ class Game(ShowBase):
         if self.paused or self.game_over:
             return task.cont
 
+        # Replace the current boss spawn check with these lines
+        current_time = time.time()
+        
+        # Update actual game time (not affected by blue orbs)
+        if not self.paused and not self.game_over:
+            self.actual_game_time += current_time - self.last_time_update
+        self.last_time_update = current_time
+        
+        # Check for boss spawn using actual_game_time
+        if self.actual_game_time >= self.boss_spawn_time and not self.boss and not self.game_over:
+            self.spawn_boss()
+
+        # Add this line here
+        if self.boss:
+            self.update_boss()
+
         # Update dash animation
         self.update_dash(task)
         
-        
-
         # Handle keyboard input
         dx = 0
         dy = 0
@@ -488,6 +512,27 @@ class Game(ShowBase):
         # Check for projectile-enemy collisions
         for projectile in self.projectiles[:]:
             proj_pos = projectile.getPos()
+
+            # Add boss collision check here, before the regular enemy check
+            if self.boss:
+                boss_pos = self.boss.getPos()
+                # Use larger collision radius for boss (0.3 instead of 0.07)
+                if (abs(proj_pos[0] - boss_pos[0]) < 0.3 and 
+                    abs(proj_pos[2] - boss_pos[2]) < 0.3):
+                    self.create_explosion(boss_pos[0], boss_pos[2])
+                    self.boss_health -= 1
+                    projectile.removeNode()
+                    self.projectiles.remove(projectile)
+                    self.enemy_death_sound.play()
+                    
+                    if self.boss_health <= 0:
+                        self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
+                        self.score += 10  # Bonus points for killing boss
+                        self.score_text.setText(f"Score: {self.score}")
+                        self.boss.removeNode()
+                        self.boss = None
+                    continue
+
             for enemy in self.enemies[:]:
                 enemy_pos = enemy.getPos()
                 if (abs(proj_pos[0] - enemy_pos[0]) < 0.07 and 
@@ -730,6 +775,12 @@ class Game(ShowBase):
 
     def restart_game(self):
 
+        self.actual_game_time = 0
+        self.last_time_update = time.time()
+
+        if self.boss:
+            self.boss.removeNode()
+            self.boss = None
 
         if self.dash_indicator:
             self.dash_indicator.show()
@@ -995,12 +1046,14 @@ class Game(ShowBase):
                 self.blue_orb = None
 
     def update_debug_text(self):
+        # Modify your debug text to show both timers
         current_time = time.time()
         effective_time = current_time - self.game_start_time
         
         debug_str = (
             f"Enemy Limit: {self.enemy_limit}\n"
-            f"Game Time: {effective_time:.1f}s"
+            f"Game Time: {effective_time:.1f}s\n"
+            f"Boss Time: {self.actual_game_time:.1f}s"
         )
         
         self.debug_text.setText(debug_str)
@@ -1194,6 +1247,30 @@ class Game(ShowBase):
                 self.enemy_death_sound.play()
                 if len(self.enemies) < self.enemy_limit:
                     self.spawn_single_enemy()
+
+
+        if self.boss:
+            dash_vector_x = self.dash_target_pos[0] - self.dash_start_pos[0]
+            dash_vector_y = self.dash_target_pos[1] - self.dash_start_pos[1]
+            boss_pos = self.boss.getPos()
+            
+            # Check dash destination AoE
+            dist_to_destination = math.sqrt(
+                (boss_pos[0] - self.dash_target_pos[0])**2 + 
+                (boss_pos[2] - self.dash_target_pos[1])**2
+            )
+            
+            aoe_radius = self.aspect_ratio * 0.20
+            if dist_to_destination <= aoe_radius:
+                self.boss_health -= 1
+                self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
+                if self.boss_health <= 0:
+                    self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
+                    self.score += 10  # Bonus points for killing boss
+                    self.score_text.setText(f"Score: {self.score}")
+                    self.boss.removeNode()
+                    self.boss = None
+                    self.enemy_death_sound.play()
 
     def debug_button(self):
         out("Shoulder button pressed!", 2)
@@ -1399,3 +1476,75 @@ class Game(ShowBase):
             self.dash_indicator.hide()
         
         return task.cont
+
+
+    def spawn_boss(self):
+        # Choose a random side to spawn from
+        side = random.choice(['top', 'bottom', 'left', 'right'])
+        boss_size = 0.3  # 3x regular enemy size
+        buffer = 0.1
+
+        # Calculate spawn position based on side
+        if side == 'top':
+            x = random.uniform(-self.aspect_ratio + boss_size, self.aspect_ratio - boss_size)
+            y = 1 + buffer
+        elif side == 'bottom':
+            x = random.uniform(-self.aspect_ratio + boss_size, self.aspect_ratio - boss_size)
+            y = -1 - buffer
+        elif side == 'left':
+            x = -self.aspect_ratio - buffer
+            y = random.uniform(-1 + boss_size, 1 - boss_size)
+        else:  # right
+            x = self.aspect_ratio + buffer
+            y = random.uniform(-1 + boss_size, 1 - boss_size)
+
+        # Create the boss
+        cm = CardMaker("boss")
+        cm.setFrame(-boss_size, boss_size, -boss_size, boss_size)
+        self.boss = self.render2d.attachNewNode(cm.generate())
+        boss_tex = self.loader.loadTexture(get_resource_path("boss1.png"))
+        self.boss.setTexture(boss_tex)
+        self.boss.setTransparency(TransparencyAttrib.MAlpha)
+        self.boss.setPos(x, 0, y)
+        self.boss_health = self.boss_hits_required
+
+    def update_boss(self):
+        if not self.boss:
+            return
+
+        boss_pos = self.boss.getPos()
+        player_pos = (self.player_pos[0], self.player_pos[1])
+        
+        # Calculate direction to player
+        dx = player_pos[0] - boss_pos[0]
+        dy = player_pos[1] - boss_pos[2]
+        
+        distance = math.sqrt(dx * dx + dy * dy)
+        if distance > 0:
+            dx /= distance
+            dy /= distance
+        
+        # Calculate current max enemy speed
+        seconds_elapsed = time.time() - self.game_start_time
+        current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
+        boss_speed = current_max * self.boss_speed_multiplier
+        
+        # Update position
+        new_x = boss_pos[0] + dx * boss_speed
+        new_y = boss_pos[2] + dy * boss_speed
+        
+        # Clamp to screen bounds
+        new_x = max(min(new_x, self.aspect_ratio - 0.3), -self.aspect_ratio + 0.3)
+        new_y = max(min(new_y, 0.95), -0.95)
+        
+        self.boss.setPos(new_x, 0, new_y)
+        
+        # Check collision with player if not invincible
+        if (not self.is_invincible and
+            abs(self.player_pos[0] - new_x) < 0.3 and 
+            abs(self.player_pos[1] - new_y) < 0.3):
+            self.game_over = True
+            self.game_over_text.show()
+            self.paused = True
+            if hasattr(self, 'music') and self.music:
+                self.music.stop()
