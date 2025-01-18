@@ -14,6 +14,12 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        # Add invincibility variables
+        self.is_invincible = False
+        self.invincibility_duration = 1.5
+        self.invincibility_start_time = 0
+        self.invincibility_flash_speed = 8.0  # Speed of the flashing effect
+
         self.dash_trail_particles = []
         self.dash_arc = None
         self.dash_glow = None
@@ -400,7 +406,19 @@ class Game(ShowBase):
                 projectile.removeNode()
                 self.projectiles.remove(projectile)
 
-        # Update enemies
+        # Update invincibility
+        current_time = time.time()
+        if self.is_invincible:
+            time_in_invincibility = current_time - self.invincibility_start_time
+            if time_in_invincibility >= self.invincibility_duration:
+                self.is_invincible = False
+                self.player.setColorScale(1, 1, 1, 1)  # Reset color
+            else:
+                # Create flashing effect
+                flash = (math.sin(time_in_invincibility * self.invincibility_flash_speed) * 0.3) + 0.7
+                self.player.setColorScale(1, 1, flash, 1)  # Blue-tinted flash
+        
+        # Update enemies with modified collision check
         for enemy in self.enemies[:]:
             enemy_pos = enemy.getPos()
             player_pos = (self.player_pos[0], self.player_pos[1])
@@ -422,13 +440,28 @@ class Game(ShowBase):
             
             enemy.setPos(new_x, 0, new_y)
             
+            # Check collision with player
             if (abs(self.player_pos[0] - new_x) < 0.07 and 
                 abs(self.player_pos[1] - new_y) < 0.07):
-                self.game_over = True
-                self.game_over_text.show()
-                self.paused = True
-                if hasattr(self, 'music') and self.music:
-                    self.music.stop()
+                if self.is_invincible:
+                    # Destroy enemy if player is invincible
+                    self.create_explosion(new_x, new_y)
+                    self.score += 1
+                    self.score_text.setText(f"Score: {self.score}")
+                    self.check_difficulty_increase()
+                    self.enemy_data.pop(enemy)
+                    enemy.removeNode()
+                    self.enemies.remove(enemy)
+                    self.enemy_death_sound.play()
+                    if len(self.enemies) < self.enemy_limit:
+                        self.spawn_single_enemy()
+                else:
+                    # Game over if player is not invincible
+                    self.game_over = True
+                    self.game_over_text.show()
+                    self.paused = True
+                    if hasattr(self, 'music') and self.music:
+                        self.music.stop()
         
         # Check for projectile-enemy collisions
         for projectile in self.projectiles[:]:
@@ -679,6 +712,10 @@ class Game(ShowBase):
         self.game_over_text.hide()
         self.pause_text.hide()
         self.paused = False
+
+        # Reset invincibility
+        self.is_invincible = False
+        self.player.setColorScale(1, 1, 1, 1)  # Reset color
 
         self.enemy_limit = self.base_num_enemies
         if self.green_orb:
@@ -1003,6 +1040,10 @@ class Game(ShowBase):
             self.player_pos[0] = self.dash_target_pos[0]
             self.player_pos[1] = self.dash_target_pos[1]
             self.player.setPos(self.dash_target_pos[0], 0, self.dash_target_pos[1])
+
+            # Start invincibility
+            self.is_invincible = True
+            self.invincibility_start_time = current_time
             
             # Clean up visual effects
             self.dash_arc.hide()
