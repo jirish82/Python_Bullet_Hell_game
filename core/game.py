@@ -14,13 +14,14 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
-        # Add dash mechanics
         self.dash_cooldown = 0.5  # Time between dashes
         self.last_dash_time = 0
-        self.dash_distance = 0.6  # 30% of screen width (remember aspect ratio)
+        self.dash_distance = 0.6  # 30% of screen width
         self.is_dashing = False
-        self.dash_duration = 0.1  # How long the dash lasts
+        self.dash_duration = 0.15  # How long the dash animation lasts
         self.dash_start_time = 0
+        self.dash_start_pos = None
+        self.dash_target_pos = None
 
         # Add these new speed-related variables
         self.speed_base_min = 0.001
@@ -295,6 +296,11 @@ class Game(ShowBase):
     def update(self, task):
         if self.paused or self.game_over:
             return task.cont
+
+        # Update dash animation
+        self.update_dash(task)
+        
+        
 
         # Handle keyboard input
         dx = 0
@@ -915,8 +921,8 @@ class Game(ShowBase):
         current_time = time.time()
         out(f"Dash attempt - direction: ({direction_x}, {direction_y})", 2)
         
-        if current_time - self.last_dash_time < self.dash_cooldown:
-            out("Dash blocked by cooldown", 2)
+        if current_time - self.last_dash_time < self.dash_cooldown or self.is_dashing:
+            out("Dash blocked by cooldown or already dashing", 2)
             return
                 
         # Normalize direction
@@ -928,19 +934,59 @@ class Game(ShowBase):
         direction_x /= magnitude
         direction_y /= magnitude
         
+        # Store start position
+        self.dash_start_pos = [self.player_pos[0], self.player_pos[1]]
+        
         # Calculate dash end position
         target_x = self.player_pos[0] + direction_x * self.dash_distance
         target_y = self.player_pos[1] + direction_y * self.dash_distance
-        
-        out(f"Dash executing - from: ({self.player_pos[0]}, {self.player_pos[1]}) to: ({target_x}, {target_y})", 2)
         
         # Clamp to screen bounds
         target_x = max(-self.aspect_ratio + 0.05, min(self.aspect_ratio - 0.05, target_x))
         target_y = max(-0.95, min(0.95, target_y))
         
-        # Check for enemies in dash path
-        dash_vector_x = target_x - self.player_pos[0]
-        dash_vector_y = target_y - self.player_pos[1]
+        self.dash_target_pos = [target_x, target_y]
+        
+        out(f"Dash executing - from: ({self.dash_start_pos[0]}, {self.dash_start_pos[1]}) to: ({target_x}, {target_y})", 2)
+        
+        # Start dash
+        self.is_dashing = True
+        self.dash_start_time = current_time
+        self.last_dash_time = current_time
+
+    def update_dash(self, task):
+        if not self.is_dashing:
+            return
+            
+        current_time = time.time()
+        progress = (current_time - self.dash_start_time) / self.dash_duration
+        
+        if progress >= 1.0:
+            # Dash complete
+            self.player_pos[0] = self.dash_target_pos[0]
+            self.player_pos[1] = self.dash_target_pos[1]
+            self.player.setPos(self.dash_target_pos[0], 0, self.dash_target_pos[1])
+            self.is_dashing = False
+            self.check_dash_collision()
+            return
+        
+        # Smooth easing function (ease-out quad)
+        t = 1 - (1 - progress) * (1 - progress)
+        
+        # Interpolate position
+        self.player_pos[0] = self.dash_start_pos[0] + (self.dash_target_pos[0] - self.dash_start_pos[0]) * t
+        self.player_pos[1] = self.dash_start_pos[1] + (self.dash_target_pos[1] - self.dash_start_pos[1]) * t
+        self.player.setPos(self.player_pos[0], 0, self.player_pos[1])
+        
+        # Check for enemy collisions during dash
+        self.check_dash_collision()
+
+    def check_dash_collision(self):
+        if not self.is_dashing:
+            return
+            
+        dash_vector_x = self.dash_target_pos[0] - self.dash_start_pos[0]
+        dash_vector_y = self.dash_target_pos[1] - self.dash_start_pos[1]
         
         # Check each enemy for intersection with dash path
         for enemy in self.enemies[:]:
@@ -949,16 +995,8 @@ class Game(ShowBase):
             px = enemy_pos[0] - self.player_pos[0]
             py = enemy_pos[2] - self.player_pos[1]
             
-            # Project point onto dash line
-            t = max(0, min(1, (px * dash_vector_x + py * dash_vector_y) / 
-                (dash_vector_x * dash_vector_x + dash_vector_y * dash_vector_y)))
-            
-            # Find closest point on dash line
-            closest_x = self.player_pos[0] + t * dash_vector_x
-            closest_y = self.player_pos[1] + t * dash_vector_y
-            
-            # Check if enemy is close enough to dash path
-            dist = math.sqrt((enemy_pos[0] - closest_x)**2 + (enemy_pos[2] - closest_y)**2)
+            # Check if enemy is close enough to current position
+            dist = math.sqrt(px * px + py * py)
             if dist < 0.1:  # Collision threshold
                 self.create_explosion(enemy_pos[0], enemy_pos[2])
                 self.score += 1
@@ -970,20 +1008,13 @@ class Game(ShowBase):
                 self.enemy_death_sound.play()
                 if len(self.enemies) < self.enemy_limit:
                     self.spawn_single_enemy()
-        
-        # Perform the dash
-        self.player_pos[0] = target_x
-        self.player_pos[1] = target_y
-        self.player.setPos(target_x, 0, target_y)
-        
-        self.last_dash_time = current_time
 
     def debug_button(self):
         out("Shoulder button pressed!", 2)
         if self.gamepad:
-            right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
-            right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
-            out(f"Right stick position: {right_x}, {right_y}", 2)
+            right_x = self.gamepad.findAxis(InputDevice.Axis.left_x).value
+            right_y = self.gamepad.findAxis(InputDevice.Axis.left_y).value
+            out(f"Left stick position: {right_x}, {right_y}", 2)
             self.perform_dash(right_x, right_y)
 
 
