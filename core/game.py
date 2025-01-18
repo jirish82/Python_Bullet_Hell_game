@@ -14,6 +14,10 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        #dash indicator
+        self.dash_indicator = None
+        self.create_dash_indicator()
+
         # Add invincibility variables
         self.is_invincible = False
         self.invincibility_duration = 1.5
@@ -711,6 +715,12 @@ class Game(ShowBase):
         return task.cont
 
     def restart_game(self):
+
+
+        if self.dash_indicator:
+            self.dash_indicator.show()
+        self.last_dash_time = 0  # Reset dash cooldown
+
         # Reset game state
         self.game_over = False
         self.game_over_text.hide()
@@ -1280,3 +1290,79 @@ class Game(ShowBase):
         particle.setBin('fixed', 98)
         
         return particle
+
+    def create_dash_indicator(self):
+        # Create the indicator
+        indicator_size = 0.015  # Small size for the indicator
+        cm = CardMaker("dash_indicator")
+        cm.setFrame(-indicator_size, indicator_size, -indicator_size, indicator_size)
+        self.dash_indicator = self.render2d.attachNewNode(cm.generate())
+        
+        # Create a glowing red circle texture
+        texture_size = 64
+        indicator_image = PNMImage(texture_size, texture_size, 4)
+        center_x = texture_size // 2
+        center_y = texture_size // 2
+        radius = texture_size // 2
+        
+        for x in range(texture_size):
+            for y in range(texture_size):
+                dx = x - center_x
+                dy = y - center_y
+                distance = math.sqrt(dx*dx + dy*dy)
+                
+                if distance <= radius:
+                    intensity = 1.0 - (distance / radius)
+                    intensity = intensity ** 0.5  # Softer falloff
+                    
+                    # Bright red core with white center
+                    if distance < radius * 0.3:
+                        indicator_image.setXel(x, y, 1.0, 0.3, 0.3)  # Light red
+                    else:
+                        indicator_image.setXel(x, y, 1.0, 0.0, 0.0)  # Pure red
+                    indicator_image.setAlpha(x, y, intensity)
+                else:
+                    indicator_image.setAlpha(x, y, 0)
+        
+        indicator_texture = Texture()
+        indicator_texture.load(indicator_image)
+        self.dash_indicator.setTexture(indicator_texture)
+        self.dash_indicator.setTransparency(TransparencyAttrib.MAlpha)
+        self.dash_indicator.setBin('fixed', 101)  # Render on top of player
+        
+        # Start the pulsing animation
+        taskMgr.add(self.update_dash_indicator, "updateDashIndicator")
+
+    def update_dash_indicator(self, task):
+        if self.paused or self.game_over:
+            self.dash_indicator.hide()
+            return task.cont
+            
+        current_time = time.time()
+        cooldown_remaining = current_time - self.last_dash_time
+        
+        # Show/hide based on cooldown
+        if cooldown_remaining >= self.dash_cooldown:
+            self.dash_indicator.show()
+            
+            # Pulsing animation
+            pulse_speed = 3.0  # Adjust for faster/slower pulse
+            pulse_magnitude = 0.3  # Adjust for larger/smaller pulse
+            base_scale = 1.0
+            
+            # Calculate scale based on sine wave
+            pulse = math.sin(task.time * pulse_speed) * pulse_magnitude
+            new_scale = base_scale + pulse
+            
+            # Update position and scale
+            self.dash_indicator.setPos(self.player_pos[0], 0, self.player_pos[1])
+            self.dash_indicator.setScale(new_scale)
+            
+            # Pulse opacity as well
+            alpha = 0.7 + (math.sin(task.time * pulse_speed) * 0.3)
+            # Use setColorScale instead of setAlpha
+            self.dash_indicator.setColorScale(1, 1, 1, alpha)
+        else:
+            self.dash_indicator.hide()
+        
+        return task.cont
