@@ -30,7 +30,7 @@ class Game(ShowBase):
         self.trail_lifetime = 0.4  # Increased from 0.3
         self.max_trail_particles = 15  # Increased from 10
 
-        self.dash_cooldown = 10  # Time between dashes
+        self.dash_cooldown = 3  # Time between dashes
         self.last_dash_time = 0
         self.dash_distance = 0.6  # 30% of screen width
         self.is_dashing = False
@@ -167,7 +167,7 @@ class Game(ShowBase):
             self.music = self.loader.loadSfx(get_resource_path("music.mp3"))
             if self.music:
                 self.music.setLoop(True)
-                self.music.setVolume(0.1)
+                self.music.setVolume(0.05)
                 self.music.play()
                 self.music_playing = True
                 self.music_paused = False
@@ -175,9 +175,9 @@ class Game(ShowBase):
 
                 # Add these after your music setup
                 self.enemy_death_sound = self.loader.loadSfx(get_resource_path("enemy_death.mp3"))
-                self.enemy_death_sound.setVolume(0.3)  # Add this line
+                self.enemy_death_sound.setVolume(0.1)  # Add this line
                 self.gun_sound = self.loader.loadSfx(get_resource_path("gun.mp3"))
-                self.gun_sound.setVolume(0.3)  # Add this line
+                self.gun_sound.setVolume(0.1)  # Add this line
             else:
                 out("Could not load music file")
                 self.music_playing = False
@@ -186,6 +186,13 @@ class Game(ShowBase):
             out(f"Error loading music: {e}")
             self.music_playing = False
             self.music_paused = False
+
+        try:
+            self.dash_ready_sound = self.loader.loadSfx(get_resource_path("powerup1.mp3"))
+            self.dash_ready_sound.setVolume(0.8)  # Adjust volume as needed
+        except Exception as e:
+            out(f"Error loading dash ready sound: {e}")
+            self.dash_ready_sound = None
 
         # Load and set up the background
         # Replace the current background setup code with:
@@ -292,7 +299,7 @@ class Game(ShowBase):
                 self.music.setVolume(0)
                 self.music_playing = False
             else:
-                self.music.setVolume(0.5)
+                self.music.setVolume(0.3)
                 self.music_playing = True
             
     def togglePause(self):
@@ -1341,8 +1348,23 @@ class Game(ShowBase):
         current_time = time.time()
         cooldown_remaining = current_time - self.last_dash_time
         
+        # Add this to track when dash becomes available
+        if not hasattr(self, '_dash_was_ready'):
+            self._dash_was_ready = False
+        
         # Show/hide based on cooldown
-        if cooldown_remaining >= self.dash_cooldown:
+        is_dash_ready = cooldown_remaining >= self.dash_cooldown
+        
+        # Play sound when dash first becomes available
+        if is_dash_ready and not self._dash_was_ready:
+            if hasattr(self, 'dash_ready_sound') and self.dash_ready_sound:
+                out("playing powerup", 3)
+                self.dash_ready_sound.play()
+        
+        # Update dash ready state
+        self._dash_was_ready = is_dash_ready
+        
+        if is_dash_ready:
             self.dash_indicator.show()
             
             # Pulsing animation
@@ -1360,7 +1382,6 @@ class Game(ShowBase):
             
             # Pulse opacity as well
             alpha = 0.7 + (math.sin(task.time * pulse_speed) * 0.3)
-            # Use setColorScale instead of setAlpha
             self.dash_indicator.setColorScale(1, 1, 1, alpha)
         else:
             self.dash_indicator.hide()
