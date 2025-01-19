@@ -26,7 +26,7 @@ class Game(ShowBase):
         #boss
         self.boss = None
         self.boss_health = 0
-        self.boss_spawn_time_base = 10
+        self.boss_spawn_time_base = 30
         self.boss_spawn_time = self.boss_spawn_time_base  # Seconds before boss spawns
         self.boss_hits_required = 20
         self.boss_speed_multiplier = 0.5
@@ -838,6 +838,7 @@ class Game(ShowBase):
 
         self.actual_game_time = 0
         self.last_time_update = time.time()
+        self.game_start_time = time.time()
 
         #remvoe boss projectiles
         for projectile in self.boss_projectiles:
@@ -858,6 +859,8 @@ class Game(ShowBase):
         self.game_over_text.hide()
         self.pause_text.hide()
         self.paused = False
+
+        self.boss_spawn_time = self.boss_spawn_time_base
 
         # Reset level and base difficulties if it's a full restart
         self.level = 1
