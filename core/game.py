@@ -14,13 +14,20 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        # Add with other game state variables
+        self.level = 1
+        self.base_speed_min = 0.001  # Store initial values
+        self.base_speed_max = 0.003
+        self.base_num_enemies = 5
+
         self.actual_game_time = 0
         self.last_time_update = time.time()
 
         #boss
         self.boss = None
         self.boss_health = 0
-        self.boss_spawn_time = 5  # Seconds before boss spawns
+        self.boss_spawn_time_base = 10
+        self.boss_spawn_time = self.boss_spawn_time_base  # Seconds before boss spawns
         self.boss_hits_required = 20
         self.boss_speed_multiplier = 0.5
 
@@ -50,16 +57,16 @@ class Game(ShowBase):
         self.dash_target_pos = None
 
         # Add these new speed-related variables
-        self.speed_base_min = 0.001
-        self.speed_base_max = 0.003
         self.speed_min_increase_rate = 0.0001  # per second
         self.speed_max_increase_rate = 0.0002  # per second
         self.game_start_time = time.time()
 
+        self.speed_base_min = self.base_speed_min
+        self.speed_base_max = self.base_speed_max
+        self.num_enemies = self.base_num_enemies
+
         # Initialize enemy-related variables first
-        self.num_enemies = 10  # Start with 10 enemies
         self.enemy_limit = self.num_enemies  # Track max allowed enemies separately
-        self.base_num_enemies = 10  # Store the initial number
         self.enemies_per_score = 8  # Increase enemies every 10 points
         self.previous_enemy_increase = 0  # Track when we last increased enemies
 
@@ -563,6 +570,28 @@ class Game(ShowBase):
                         self.score_text.setText(f"Score: {self.score}")
                         self.boss.removeNode()
                         self.boss = None
+                        
+                        # Increment level and increase base difficulties by 10%
+                        self.level += 1
+                        self.base_speed_min *= 1.1
+                        self.base_speed_max *= 1.1
+                        self.base_num_enemies = max(int(self.base_num_enemies * 1.1), self.base_num_enemies + 1)
+                        
+                        # Reset current values to new base values
+                        self.speed_min = self.base_speed_min
+                        self.speed_max = self.base_speed_max
+                        self.num_enemies = self.base_num_enemies
+                        
+                        # Reset speed increase over time
+                        self.game_start_time = time.time()
+                        self.speed_base_max = self.speed_max
+                        
+                        # Reset game time tracking for next boss
+                        #self.actual_game_time = 0
+                        self.last_time_update = time.time()
+                        
+                        # Increase boss spawn time by the initial spawn time
+                        self.boss_spawn_time += self.boss_spawn_time_base  # Add another 5 seconds each level
                     continue
 
             for enemy in self.enemies[:]:
@@ -830,6 +859,15 @@ class Game(ShowBase):
         self.pause_text.hide()
         self.paused = False
 
+        # Reset level and base difficulties if it's a full restart
+        self.level = 1
+            
+        
+        # Set current values to base values
+        self.speed_base_min = self.base_speed_min
+        self.speed_base_max = self.base_speed_max
+        self.num_enemies = self.base_num_enemies
+
         # Reset invincibility
         self.is_invincible = False
         self.player.setColorScale(1, 1, 1, 1)  # Reset color
@@ -1091,7 +1129,8 @@ class Game(ShowBase):
         debug_str = (
             f"Enemy Limit: {self.enemy_limit}\n"
             f"Game Time: {effective_time:.1f}s\n"
-            f"Boss Time: {self.actual_game_time:.1f}s"
+            f"Boss Time: {self.actual_game_time:.1f}s\n"
+            f"Level: {self.level}"
         )
         
         self.debug_text.setText(debug_str)
