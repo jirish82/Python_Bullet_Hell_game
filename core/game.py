@@ -14,17 +14,26 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
-        self.white_screen_duration = 1.0  # How long to stay on white screen
-        self.fade_duration = 1.0  # How long to fade in/out
-        self.transitioning_to_town = False
-        self.town_area = None  # Will be initialized when needed
+        self.last_boss_break = 0
+        self.update_sequence_count = 0
+
+        self.town_area = None  # Will be initialized during transition
+        self.boss_death_duration = 180      # Time for explosions
+        self.white_fade_duration = 120      # Time to fade to white
+        self.white_screen_duration = 60    # Time to hold white
+        self.fade_duration = 60           # Time to fade to town
 
         self.boss_death_sequence = False
         self.boss_death_start_time = 0
-        self.boss_death_duration = 3.0  # Total duration of death sequence
         self.screen_shake_intensity = 0.05
         self.white_overlay = None
         self.boss_final_pos = None  # Store boss position for death sequence
+
+        self.dying_boss = None  # Store the dying boss node
+        self.boss_death_shake_intensity = 0.02  # How much the boss shakes
+        self.boss_death_scale_start = 1.0
+        self.boss_death_scale_end = 1.3  # 30% size increase
+        self.boss_death_shake_frames = 120  # 2 seconds at 60fps
 
         # Add with other game state variables
         self.level = 1
@@ -38,9 +47,9 @@ class Game(ShowBase):
         #boss
         self.boss = None
         self.boss_health = 0
-        self.boss_spawn_time_base = 30
+        self.boss_spawn_time_base = 15
         self.boss_spawn_time = self.boss_spawn_time_base  # Seconds before boss spawns
-        self.boss_hits_required = 20
+        self.boss_hits_required = 10
         self.boss_speed_multiplier = 0.5
 
         #dash indicator
@@ -202,7 +211,7 @@ class Game(ShowBase):
             self.music = self.loader.loadSfx(get_resource_path("music.mp3"))
             if self.music:
                 self.music.setLoop(True)
-                self.music.setVolume(0.1)
+                self.music.setVolume(0)
                 self.music.play()
                 self.music_playing = True
                 self.music_paused = False
@@ -366,8 +375,10 @@ class Game(ShowBase):
 
         if self.boss_death_sequence:
             self.update_boss_death_sequence(task)
-        
-        if self.paused or self.game_over or self.boss_death_sequence:
+            # Return here only if we don't want any other updates during death sequence
+            return task.cont
+    
+        if self.paused or self.game_over:
             return task.cont
 
         # Replace the current boss spawn check with these lines
@@ -582,10 +593,14 @@ class Game(ShowBase):
                     
                     if self.boss_health <= 0:
 
+                        current_time = time.time()
+                        out(f"[{current_time:.3f}] Boss health reached 0, starting death sequence", 3)
                         boss_pos = self.boss.getPos()
+                        out(f"[{current_time:.3f}] Boss final position: ({boss_pos[0]:.2f}, {boss_pos[2]:.2f})", 3)
                         self.start_boss_death_sequence((boss_pos[0], boss_pos[2]))
                         self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
-                        self.score += 10  # Bonus points for killing boss
+                        out(f"[{current_time:.3f}] Created initial boss death explosion", 3)
+                        self.score += 10
                         self.score_text.setText(f"Score: {self.score}")
                         self.boss.removeNode()
                         self.boss = None
@@ -741,8 +756,14 @@ class Game(ShowBase):
         self.enemies.append(enemy)
 
     def create_explosion(self, pos_x, pos_y, is_aoe=False):
-        # Make AoE explosions larger
-        explosion_size = 0.3 if is_aoe else 0.2
+        current_time = time.time()
+        if self.boss_death_sequence:
+            explosion_size = 0.4
+            out(f"[{current_time:.3f}] Creating death sequence explosion size {explosion_size} at ({pos_x:.2f}, {pos_y:.2f})", 3)
+        else:
+            explosion_size = 0.3 if is_aoe else 0.2
+            out(f"[{current_time:.3f}] Creating regular explosion size {explosion_size} at ({pos_x:.2f}, {pos_y:.2f})", 3)
+
         cm = CardMaker("explosion")
         cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
         explosion = self.render2d.attachNewNode(cm.generate())
@@ -814,22 +835,24 @@ class Game(ShowBase):
         
         self.explosions.append(explosion)
 
-    def update_explosions(self, task):
-        if self.paused:
+    def update_explosions(self, task, is_aoe = False):
+        current_time = time.time()
+        if self.paused and not self.boss_death_sequence:
+            out(f"[{current_time:.3f}] Explosions paused (not in death sequence)", 3)
             return task.cont
         
-        current_time = globalClock.getFrameTime()
+        frame_time = globalClock.getFrameTime()
         
         for explosion in self.explosions[:]:
             if explosion not in self.explosion_data:
+                out(f"[{current_time:.3f}] Explosion missing from data!", 3)
                 continue
                 
             data = self.explosion_data[explosion]
-            start_time = data['start_time']
-            age = current_time - start_time
-            is_aoe = data.get('is_aoe', False)
+            age = frame_time - data['start_time']
             
             if age > self.explosion_duration:
+                out(f"[{current_time:.3f}] Removing aged explosion", 3)
                 explosion.removeNode()
                 self.explosions.remove(explosion)
                 self.explosion_data.pop(explosion)
@@ -1368,10 +1391,15 @@ class Game(ShowBase):
                 self.boss_health -= 1
                 self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
                 if self.boss_health <= 0:
+
+                    current_time = time.time()
+                    out(f"[{current_time:.3f}] Boss health reached 0, starting death sequence", 3)
                     boss_pos = self.boss.getPos()
+                    out(f"[{current_time:.3f}] Boss final position: ({boss_pos[0]:.2f}, {boss_pos[2]:.2f})", 3)
                     self.start_boss_death_sequence((boss_pos[0], boss_pos[2]))
                     self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
-                    self.score += 10  # Bonus points for killing boss
+                    out(f"[{current_time:.3f}] Created initial boss death explosion", 3)
+                    self.score += 10
                     self.score_text.setText(f"Score: {self.score}")
                     self.boss.removeNode()
                     self.boss = None
@@ -1687,57 +1715,100 @@ class Game(ShowBase):
 
     def start_boss_death_sequence(self, boss_pos):
         self.boss_death_sequence = True
-        self.boss_death_start_time = time.time()
-        self.boss_final_pos = boss_pos  # Store as (x, y)
-        self.white_overlay = self.create_white_overlay()
+        self.update_sequence_count = 0
+        self.last_boss_break = 0
+        self.boss_final_pos = boss_pos
+        
+        # Create white overlay
+        cm = CardMaker("white_overlay")
+        cm.setFrame(-2, 2, -2, 2)
+        self.white_overlay = self.render2d.attachNewNode(cm.generate())
+        self.white_overlay.setColor(1, 1, 1, 0)
+        self.white_overlay.setBin('fixed', 1000)
+        self.white_overlay.setDepthTest(False)
+        self.white_overlay.setDepthWrite(False)
+        self.white_overlay.setTransparency(TransparencyAttrib.MAlpha)
+        
+        # Add the update task
+        taskMgr.add(self.update_boss_death_sequence, "boss_death_sequence")
 
     def update_boss_death_sequence(self, task):
         if not self.boss_death_sequence:
-            return
+            return task.cont
+            
+        self.update_sequence_count += 1
+        total_frames = (self.boss_death_duration + self.white_fade_duration + 
+                    self.white_screen_duration + self.fade_duration)
         
-        current_time = time.time()
-        elapsed = current_time - self.boss_death_start_time
+        if self.update_sequence_count > self.last_boss_break:
+            out("one second has passed (or this is the first sequence update)", 3)
+            self.last_boss_break += 60
         
-        if elapsed > self.boss_death_duration + self.white_screen_duration + self.fade_duration:
-            self.boss_death_sequence = False
-            if self.white_overlay:
-                self.white_overlay.removeNode()
-            self.transition_to_town()
-            return
+        out(f"Frame {self.update_sequence_count} / {total_frames}", 3)
+        out(f"Current phase:", 3)
         
-        # Screen shake and explosions only during initial phase
-        if elapsed <= self.boss_death_duration:
-            # Screen shake
+        # Track current phase
+        if self.update_sequence_count <= self.boss_death_duration:
+            out(f"  Explosion phase (Frame {self.update_sequence_count} / {self.boss_death_duration})", 3)
+            self.white_overlay.setColor(1, 1, 1, 0)
+            out(f"White overlay opacity: 0.0", 3)
+            
+        elif self.update_sequence_count <= self.boss_death_duration + self.white_fade_duration:
+            fade_frames = self.update_sequence_count - self.boss_death_duration
+            opacity = fade_frames / self.white_fade_duration
+            opacity = min(1.0, opacity)
+            out(f"  White fade phase (Frame {fade_frames} / {self.white_fade_duration})", 3)
+            out(f"White overlay opacity: {opacity:.3f}", 3)
+            self.white_overlay.setColor(1, 1, 1, opacity)
+            
+        elif self.update_sequence_count <= self.boss_death_duration + self.white_fade_duration + self.white_screen_duration:
+            out(f"  White screen phase", 3)
+            self.white_overlay.setColor(1, 1, 1, 1)
+            out(f"White overlay opacity: 1.0", 3)
+            
+            # Start loading town when we first enter the white screen phase
+            if self.update_sequence_count == self.boss_death_duration + self.white_fade_duration + 1:
+                out("Screen is fully white, loading town", 3)
+                self.transition_to_town()
+            
+        else:
+            fade_out_frames = self.update_sequence_count - (self.boss_death_duration + self.white_fade_duration + self.white_screen_duration)
+            opacity = 1.0 - (fade_out_frames / self.fade_duration)
+            opacity = max(0.0, opacity)
+            out(f"  Final fade phase", 3)
+            out(f"White overlay opacity: {opacity:.3f}", 3)
+            self.white_overlay.setColor(1, 1, 1, opacity)
+
+        # Handle explosions and screen shake
+        if self.update_sequence_count <= self.boss_death_duration + self.white_fade_duration:
+            self.update_explosions(task)
+            
             shake_x = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
             shake_y = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
             self.camera.setPos(shake_x, 0, shake_y)
             
-            # Create random explosions
-            if random.random() < 0.3:
+            if random.random() < 0.5:
                 x = random.uniform(-self.aspect_ratio, self.aspect_ratio)
                 y = random.uniform(-1, 1)
                 self.create_explosion(x, y, is_aoe=True)
             
-            # Create explosions at boss position
-            if random.random() < 0.5:
-                offset_x = random.uniform(-0.3, 0.3)
-                offset_y = random.uniform(-0.3, 0.3)
+            if random.random() < 0.7:
+                offset_x = random.uniform(-0.5, 0.5)
+                offset_y = random.uniform(-0.5, 0.5)
                 self.create_explosion(
                     self.boss_final_pos[0] + offset_x,
                     self.boss_final_pos[1] + offset_y,
                     is_aoe=True
                 )
-            
-            # Fade to white
-            progress = elapsed / self.boss_death_duration
+
+        if self.update_sequence_count > total_frames:
+            out(f"Death sequence complete", 3)
+            self.boss_death_sequence = False
             if self.white_overlay:
-                self.white_overlay.setColor(1, 1, 1, progress)
-        
-        elif elapsed > self.boss_death_duration + self.white_screen_duration:
-            # Start fading back in to show town
-            fade_progress = (elapsed - (self.boss_death_duration + self.white_screen_duration)) / self.fade_duration
-            if self.white_overlay:
-                self.white_overlay.setColor(1, 1, 1, 1 - fade_progress)
+                self.white_overlay.removeNode()
+            return task.done
+
+        return task.cont
 
     def complete_boss_death(self, task):
         # Reset camera position
