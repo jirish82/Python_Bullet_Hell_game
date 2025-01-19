@@ -14,6 +14,13 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.boss_death_sequence = False
+        self.boss_death_start_time = 0
+        self.boss_death_duration = 3.0  # Total duration of death sequence
+        self.screen_shake_intensity = 0.05
+        self.white_overlay = None
+        self.boss_final_pos = None  # Store boss position for death sequence
+
         # Add with other game state variables
         self.level = 1
         self.base_speed_min = 0.001  # Store initial values
@@ -351,7 +358,11 @@ class Game(ShowBase):
         self.keys[key] = value
         
     def update(self, task):
-        if self.paused or self.game_over:
+
+        if self.boss_death_sequence:
+            self.update_boss_death_sequence(task)
+        
+        if self.paused or self.game_over or self.boss_death_sequence:
             return task.cont
 
         # Replace the current boss spawn check with these lines
@@ -565,11 +576,18 @@ class Game(ShowBase):
                     self.enemy_death_sound.play()
                     
                     if self.boss_health <= 0:
+
+                        boss_pos = self.boss.getPos()
+                        self.start_boss_death_sequence((boss_pos[0], boss_pos[2]))
                         self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
                         self.score += 10  # Bonus points for killing boss
                         self.score_text.setText(f"Score: {self.score}")
                         self.boss.removeNode()
                         self.boss = None
+                        self.enemy_death_sound.play()
+
+                        # Wait until death sequence is complete to proceed
+                        taskMgr.doMethodLater(self.boss_death_duration, self.complete_boss_death, 'complete_boss_death')
                         
                         # Increment level and increase base difficulties by 10%
                         self.level += 1
@@ -1345,12 +1363,17 @@ class Game(ShowBase):
                 self.boss_health -= 1
                 self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
                 if self.boss_health <= 0:
+                    boss_pos = self.boss.getPos()
+                    self.start_boss_death_sequence((boss_pos[0], boss_pos[2]))
                     self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
                     self.score += 10  # Bonus points for killing boss
                     self.score_text.setText(f"Score: {self.score}")
                     self.boss.removeNode()
                     self.boss = None
                     self.enemy_death_sound.play()
+
+                    # Wait until death sequence is complete to proceed
+                    taskMgr.doMethodLater(self.boss_death_duration, self.complete_boss_death, 'complete_boss_death')
 
     def debug_button(self):
         out("Shoulder button pressed!", 2)
@@ -1648,3 +1671,83 @@ class Game(ShowBase):
         projectile.setPos(x, 0, y)
         projectile.setPythonTag("direction", (direction_x, direction_y))
         self.boss_projectiles.append(projectile)
+
+    def create_white_overlay(self):
+        cm = CardMaker("white_overlay")
+        cm.setFrame(-2, 2, -2, 2)  # Make it larger than screen
+        overlay = self.render2d.attachNewNode(cm.generate())
+        overlay.setColor(1, 1, 1, 0)  # Start fully transparent
+        overlay.setBin('fixed', 200)  # Ensure it's on top
+        return overlay
+
+    def start_boss_death_sequence(self, boss_pos):
+        self.boss_death_sequence = True
+        self.boss_death_start_time = time.time()
+        self.boss_final_pos = boss_pos  # Store as (x, y)
+        self.white_overlay = self.create_white_overlay()
+
+    def update_boss_death_sequence(self, task):
+        if not self.boss_death_sequence:
+            return
+        
+        current_time = time.time()
+        elapsed = current_time - self.boss_death_start_time
+        
+        if elapsed > self.boss_death_duration:
+            self.boss_death_sequence = False
+            if self.white_overlay:
+                self.white_overlay.removeNode()
+            return
+        
+        # Screen shake
+        shake_x = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
+        shake_y = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
+        self.camera.setPos(shake_x, 0, shake_y)
+        
+        # Create random explosions
+        if random.random() < 0.3:  # 30% chance each frame
+            x = random.uniform(-self.aspect_ratio, self.aspect_ratio)
+            y = random.uniform(-1, 1)
+            self.create_explosion(x, y, is_aoe=True)
+        
+        # Create explosions at boss position
+        if random.random() < 0.5:  # 50% chance each frame
+            offset_x = random.uniform(-0.3, 0.3)
+            offset_y = random.uniform(-0.3, 0.3)
+            self.create_explosion(
+                self.boss_final_pos[0] + offset_x,
+                self.boss_final_pos[1] + offset_y,  # Changed from [2] to [1]
+                is_aoe=True
+            )
+        
+        # Update white overlay
+        if self.white_overlay:
+            progress = elapsed / self.boss_death_duration
+            self.white_overlay.setColor(1, 1, 1, progress)
+
+    def complete_boss_death(self, task):
+        # Reset camera position
+        self.camera.setPos(0, 0, 0)
+        
+        # Increment level and increase base difficulties by 10%
+        self.level += 1
+        self.base_speed_min *= 1.1
+        self.base_speed_max *= 1.1
+        self.base_num_enemies = max(int(self.base_num_enemies * 1.1), self.base_num_enemies + 1)
+        
+        # Reset current values to new base values
+        self.speed_min = self.base_speed_min
+        self.speed_max = self.base_speed_max
+        self.num_enemies = self.base_num_enemies
+        
+        # Reset speed increase over time
+        self.game_start_time = time.time()
+        self.speed_base_max = self.speed_max
+        
+        # Reset game time tracking for next boss
+        self.last_time_update = time.time()
+        
+        # Increase boss spawn time
+        self.boss_spawn_time += self.boss_spawn_time_base
+        
+        return Task.done
