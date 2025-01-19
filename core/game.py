@@ -602,8 +602,8 @@ class Game(ShowBase):
                         out(f"[{current_time:.3f}] Created initial boss death explosion", 3)
                         self.score += 10
                         self.score_text.setText(f"Score: {self.score}")
-                        self.boss.removeNode()
-                        self.boss = None
+                        #self.boss.removeNode()
+                        #self.boss = None
                         self.enemy_death_sound.play()
 
                         # Wait until death sequence is complete to proceed
@@ -1735,7 +1735,7 @@ class Game(ShowBase):
     def update_boss_death_sequence(self, task):
         if not self.boss_death_sequence:
             return task.cont
-            
+                
         self.update_sequence_count += 1
         total_frames = (self.boss_death_duration + self.white_fade_duration + 
                     self.white_screen_duration + self.fade_duration)
@@ -1746,6 +1746,32 @@ class Game(ShowBase):
         
         out(f"Frame {self.update_sequence_count} / {total_frames}", 3)
         out(f"Current phase:", 3)
+        
+        # Handle boss death animation during explosion phase
+        if self.boss and self.update_sequence_count <= self.boss_death_shake_frames:
+            # Calculate progress through the death animation
+            progress = self.update_sequence_count / self.boss_death_shake_frames
+            
+            # Shake effect
+            shake_x = random.uniform(-self.boss_death_shake_intensity, self.boss_death_shake_intensity)
+            self.boss.setPos(
+                self.boss_final_pos[0] + shake_x,
+                0,
+                self.boss_final_pos[1]
+            )
+            
+            # Scale effect
+            scale_factor = self.boss_death_scale_start + (
+                (self.boss_death_scale_end - self.boss_death_scale_start) * progress
+            )
+            self.boss.setScale(scale_factor)
+            
+            # If we're at the end of the shake frames, create final explosion and remove boss
+            if self.update_sequence_count == self.boss_death_shake_frames:
+                final_pos = self.boss.getPos()
+                self.create_explosion(final_pos[0], final_pos[2], is_aoe=True)
+                self.boss.removeNode()
+                self.boss = None
         
         # Track current phase
         if self.update_sequence_count <= self.boss_death_duration:
