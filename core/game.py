@@ -21,8 +21,8 @@ class Game(ShowBase):
         self.boss = None
         self.boss_health = 0
         self.boss_spawn_time = 5  # Seconds before boss spawns
-        self.boss_hits_required = 5
-        self.boss_speed_multiplier = 1.5
+        self.boss_hits_required = 20
+        self.boss_speed_multiplier = 0.5
 
         #dash indicator
         self.dash_indicator = None
@@ -145,6 +145,12 @@ class Game(ShowBase):
         # Initialize projectiles list
         self.projectiles = []
         self.projectile_speed = 0.03
+
+        # Add the boss projectile variables here, after projectile_speed is defined
+        self.boss_projectiles = []
+        self.boss_projectile_speed = self.projectile_speed / 6  # 1/3 of player projectile speed
+        self.boss_fire_rate = 0.8  # 4x second fire
+        self.boss_last_fire_time = 0
         
         # Initialize trigger state
         self.last_trigger_state = 0
@@ -451,6 +457,32 @@ class Game(ShowBase):
                 new_z < -1.1):
                 projectile.removeNode()
                 self.projectiles.remove(projectile)
+
+        for projectile in self.boss_projectiles[:]:
+            current_pos = projectile.getPos()
+            direction = projectile.getPythonTag("direction")
+            new_x = current_pos[0] + direction[0] * self.boss_projectile_speed
+            new_z = current_pos[2] + direction[1] * self.boss_projectile_speed
+            projectile.setPos(new_x, 0, new_z)
+            
+            # Remove if off screen
+            if (new_x > self.aspect_ratio + 0.1 or 
+                new_x < -self.aspect_ratio - 0.1 or 
+                new_z > 1.1 or 
+                new_z < -1.1):
+                projectile.removeNode()
+                self.boss_projectiles.remove(projectile)
+                continue
+            
+            # Check collision with player
+            if (not self.is_invincible and
+                abs(self.player_pos[0] - new_x) < 0.1 and 
+                abs(self.player_pos[1] - new_z) < 0.1):
+                self.game_over = True
+                self.game_over_text.show()
+                self.paused = True
+                if hasattr(self, 'music') and self.music:
+                    self.music.stop()
 
         # Update invincibility
         current_time = time.time()
@@ -777,6 +809,12 @@ class Game(ShowBase):
 
         self.actual_game_time = 0
         self.last_time_update = time.time()
+
+        #remvoe boss projectiles
+        for projectile in self.boss_projectiles:
+            projectile.removeNode()
+        self.boss_projectiles.clear()
+        self.boss_last_fire_time = 0
 
         if self.boss:
             self.boss.removeNode()
@@ -1512,6 +1550,7 @@ class Game(ShowBase):
         if not self.boss:
             return
 
+        current_time = time.time()
         boss_pos = self.boss.getPos()
         player_pos = (self.player_pos[0], self.player_pos[1])
         
@@ -1524,7 +1563,12 @@ class Game(ShowBase):
             dx /= distance
             dy /= distance
         
-        # Calculate current max enemy speed
+        # Fire projectile if enough time has passed
+        if current_time - self.boss_last_fire_time >= self.boss_fire_rate:
+            self.create_boss_projectile(boss_pos[0], boss_pos[2], dx, dy)
+            self.boss_last_fire_time = current_time
+        
+        # Rest of existing boss movement code...
         seconds_elapsed = time.time() - self.game_start_time
         current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
         boss_speed = current_max * self.boss_speed_multiplier
@@ -1548,3 +1592,17 @@ class Game(ShowBase):
             self.paused = True
             if hasattr(self, 'music') and self.music:
                 self.music.stop()
+
+    def create_boss_projectile(self, x, y, direction_x, direction_y):
+        cm = CardMaker("boss_projectile")
+        projectile_size = 0.06  # 3x normal projectile size
+        cm.setFrame(-projectile_size, projectile_size, -projectile_size, projectile_size)
+        projectile = self.render2d.attachNewNode(cm.generate())
+        
+        projectile_tex = self.loader.loadTexture(get_resource_path("orb.png"))
+        projectile.setTexture(projectile_tex)
+        projectile.setTransparency(TransparencyAttrib.MAlpha)
+        
+        projectile.setPos(x, 0, y)
+        projectile.setPythonTag("direction", (direction_x, direction_y))
+        self.boss_projectiles.append(projectile)
