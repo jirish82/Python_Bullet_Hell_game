@@ -14,6 +14,11 @@ class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
 
+        self.white_screen_duration = 1.0  # How long to stay on white screen
+        self.fade_duration = 1.0  # How long to fade in/out
+        self.transitioning_to_town = False
+        self.town_area = None  # Will be initialized when needed
+
         self.boss_death_sequence = False
         self.boss_death_start_time = 0
         self.boss_death_duration = 3.0  # Total duration of death sequence
@@ -1693,37 +1698,46 @@ class Game(ShowBase):
         current_time = time.time()
         elapsed = current_time - self.boss_death_start_time
         
-        if elapsed > self.boss_death_duration:
+        if elapsed > self.boss_death_duration + self.white_screen_duration + self.fade_duration:
             self.boss_death_sequence = False
             if self.white_overlay:
                 self.white_overlay.removeNode()
+            self.transition_to_town()
             return
         
-        # Screen shake
-        shake_x = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
-        shake_y = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
-        self.camera.setPos(shake_x, 0, shake_y)
-        
-        # Create random explosions
-        if random.random() < 0.3:  # 30% chance each frame
-            x = random.uniform(-self.aspect_ratio, self.aspect_ratio)
-            y = random.uniform(-1, 1)
-            self.create_explosion(x, y, is_aoe=True)
-        
-        # Create explosions at boss position
-        if random.random() < 0.5:  # 50% chance each frame
-            offset_x = random.uniform(-0.3, 0.3)
-            offset_y = random.uniform(-0.3, 0.3)
-            self.create_explosion(
-                self.boss_final_pos[0] + offset_x,
-                self.boss_final_pos[1] + offset_y,  # Changed from [2] to [1]
-                is_aoe=True
-            )
-        
-        # Update white overlay
-        if self.white_overlay:
+        # Screen shake and explosions only during initial phase
+        if elapsed <= self.boss_death_duration:
+            # Screen shake
+            shake_x = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
+            shake_y = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
+            self.camera.setPos(shake_x, 0, shake_y)
+            
+            # Create random explosions
+            if random.random() < 0.3:
+                x = random.uniform(-self.aspect_ratio, self.aspect_ratio)
+                y = random.uniform(-1, 1)
+                self.create_explosion(x, y, is_aoe=True)
+            
+            # Create explosions at boss position
+            if random.random() < 0.5:
+                offset_x = random.uniform(-0.3, 0.3)
+                offset_y = random.uniform(-0.3, 0.3)
+                self.create_explosion(
+                    self.boss_final_pos[0] + offset_x,
+                    self.boss_final_pos[1] + offset_y,
+                    is_aoe=True
+                )
+            
+            # Fade to white
             progress = elapsed / self.boss_death_duration
-            self.white_overlay.setColor(1, 1, 1, progress)
+            if self.white_overlay:
+                self.white_overlay.setColor(1, 1, 1, progress)
+        
+        elif elapsed > self.boss_death_duration + self.white_screen_duration:
+            # Start fading back in to show town
+            fade_progress = (elapsed - (self.boss_death_duration + self.white_screen_duration)) / self.fade_duration
+            if self.white_overlay:
+                self.white_overlay.setColor(1, 1, 1, 1 - fade_progress)
 
     def complete_boss_death(self, task):
         # Reset camera position
@@ -1751,3 +1765,33 @@ class Game(ShowBase):
         self.boss_spawn_time += self.boss_spawn_time_base
         
         return Task.done
+
+    def transition_to_town(self):
+        """Handle the transition to town area"""
+        from core.town import TownArea  # Update the import path
+        
+        # Rest of the transition_to_town method remains the same
+        # Clean up combat area
+        for enemy in self.enemies[:]:
+            enemy.removeNode()
+        self.enemies.clear()
+        self.enemy_data.clear()
+        
+        for projectile in self.projectiles[:]:
+            projectile.removeNode()
+        self.projectiles.clear()
+        
+        for projectile in self.boss_projectiles[:]:
+            projectile.removeNode()
+        self.boss_projectiles.clear()
+        
+        # Hide combat background
+        self.background_node.hide()
+        
+        # Initialize and show town area if needed
+        if not self.town_area:
+            self.town_area = TownArea(self)
+        self.town_area.enter()
+        
+        # Reset camera
+        self.camera.setPos(0, 0, 0)
