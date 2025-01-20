@@ -20,7 +20,7 @@ class Game(ShowBase):
         self.town_area = None  # Will be initialized during transition
         self.boss_death_duration = 180      # Time for explosions
         self.white_fade_duration = 120      # Time to fade to white
-        self.white_screen_duration = 60    # Time to hold white
+        self.white_screen_duration = 210    # Time to hold white
         self.fade_duration = 60           # Time to fade to town
 
         self.boss_death_sequence = False
@@ -851,20 +851,34 @@ class Game(ShowBase):
             data = self.explosion_data[explosion]
             age = frame_time - data['start_time']
             
-            if age > self.explosion_duration:
+            # Use custom duration if specified, otherwise use default
+            duration = data.get('duration', self.explosion_duration)
+            
+            if age > duration:
                 out(f"[{current_time:.3f}] Removing aged explosion", 3)
                 explosion.removeNode()
                 self.explosions.remove(explosion)
                 self.explosion_data.pop(explosion)
                 continue
             
-            progress = age / self.explosion_duration
-            scale_factor = math.sin(progress * math.pi) * 0.5 + 0.5
-            # Larger scale for AoE explosions
-            base_size = 0.4 if is_aoe else 0.3
-            max_size = 0.8 if is_aoe else 0.6
-            current_size = base_size + (max_size * scale_factor)
-            explosion.setScale(current_size)
+            progress = age / duration
+            
+            # Use custom scaling if specified
+            if 'start_scale' in data and 'end_scale' in data:
+                # Use easeInOutQuad for smoother scaling
+                if progress < 0.5:
+                    current_scale = data['start_scale'] + (data['end_scale'] - data['start_scale']) * (2 * progress * progress)
+                else:
+                    progress = progress * 2 - 1
+                    current_scale = data['start_scale'] + (data['end_scale'] - data['start_scale']) * (1 - 0.5 * (1 - progress) * (1 - progress))
+                explosion.setScale(current_scale)
+            else:
+                # Original scaling behavior for normal explosions
+                scale_factor = math.sin(progress * math.pi) * 0.5 + 0.5
+                base_size = 0.4 if is_aoe else 0.3
+                max_size = 0.8 if is_aoe else 0.6
+                current_size = base_size + (max_size * scale_factor)
+                explosion.setScale(current_size)
             
             rotation = data['initial_rotation'] + (data['rotation_speed'] * age)
             explosion.setR(rotation)
@@ -1816,14 +1830,17 @@ class Game(ShowBase):
                 explosion.setBin('fixed', 100)
                 explosion.setPos(final_pos[0], 0, final_pos[2])
                 
-                # Add to explosion tracking
+                # Add to explosion tracking with longer duration
                 self.explosion_data[explosion] = {
                     'start_time': globalClock.getFrameTime(),
                     'pos_x': final_pos[0],
                     'pos_y': final_pos[2],
-                    'rotation_speed': random.uniform(-180, 180),
+                    'rotation_speed': random.uniform(-60, 60),  # Slower rotation
                     'initial_rotation': random.uniform(0, 360),
-                    'is_aoe': True
+                    'is_aoe': True,
+                    'duration': 2.0,  # Make this explosion last 3 seconds
+                    'start_scale': 0.3,  # Start at regular size
+                    'end_scale': 2.0    # End at 2x size
                 }
                 self.explosions.append(explosion)
 
