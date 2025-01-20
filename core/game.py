@@ -1748,30 +1748,87 @@ class Game(ShowBase):
         out(f"Current phase:", 3)
         
         # Handle boss death animation during explosion phase
-        if self.boss and self.update_sequence_count <= self.boss_death_shake_frames:
+        if self.boss and self.update_sequence_count <= self.boss_death_duration:
             # Calculate progress through the death animation
-            progress = self.update_sequence_count / self.boss_death_shake_frames
+            progress = self.update_sequence_count / self.boss_death_duration
             
-            # Shake effect
-            shake_x = random.uniform(-self.boss_death_shake_intensity, self.boss_death_shake_intensity)
+            # Shake effect with decreasing intensity as boss grows
+            shake_intensity = self.boss_death_shake_intensity * (1 - progress)
+            shake_x = random.uniform(-shake_intensity, shake_intensity)
             self.boss.setPos(
                 self.boss_final_pos[0] + shake_x,
                 0,
                 self.boss_final_pos[1]
             )
             
-            # Scale effect
+            # Scale effect up to 1.5 (50% bigger)
             scale_factor = self.boss_death_scale_start + (
-                (self.boss_death_scale_end - self.boss_death_scale_start) * progress
+                (1.5 - self.boss_death_scale_start) * progress
             )
             self.boss.setScale(scale_factor)
             
-            # If we're at the end of the shake frames, create final explosion and remove boss
-            if self.update_sequence_count == self.boss_death_shake_frames:
+            # If we're at the end of the explosion phase, create final explosion and remove boss
+            if self.update_sequence_count == self.boss_death_duration - 60:
                 final_pos = self.boss.getPos()
-                self.create_explosion(final_pos[0], final_pos[2], is_aoe=True)
-                self.boss.removeNode()
-                self.boss = None
+                # Get the boss's final scale and create an appropriately sized explosion
+                final_scale = self.boss.getScale()[0]  # Get X scale component
+                explosion_size = 0.3 * final_scale * 3  # Make explosion slightly larger than boss
+                
+                # Create custom large explosion
+                cm = CardMaker("final_explosion")
+                cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
+                explosion = self.render2d.attachNewNode(cm.generate())
+                
+                texture_size = 256  # Larger texture for better quality
+                image = PNMImage(texture_size, texture_size, 4)
+                center_x = texture_size // 2
+                center_y = texture_size // 2
+                radius = texture_size // 2
+                
+                # Create a more intense explosion texture
+                for x in range(texture_size):
+                    for y in range(texture_size):
+                        dx = x - center_x
+                        dy = y - center_y
+                        distance = math.sqrt(dx*dx + dy*dy)
+                        if distance <= radius:
+                            intensity = 1.0 - (distance / radius)
+                            intensity = intensity ** 0.5  # Less falloff for stronger glow
+                            
+                            if distance < radius * 0.3:
+                                # Bright white-red core
+                                image.setXel(x, y, 1.0, 0.9, 0.9)
+                            elif distance < radius * 0.6:
+                                # Bright red-white middle with blue tint
+                                image.setXel(x, y, 1.0, 0.7, 0.9)
+                            else:
+                                # Red-blue outer
+                                image.setXel(x, y, 0.8, 0.4, 1.0)
+                            
+                            image.setAlpha(x, y, intensity)
+                        else:
+                            image.setAlpha(x, y, 0)
+                
+                texture = Texture()
+                texture.load(image)
+                explosion.setTexture(texture)
+                explosion.setTransparency(TransparencyAttrib.MAlpha)
+                explosion.setBin('fixed', 100)
+                explosion.setPos(final_pos[0], 0, final_pos[2])
+                
+                # Add to explosion tracking
+                self.explosion_data[explosion] = {
+                    'start_time': globalClock.getFrameTime(),
+                    'pos_x': final_pos[0],
+                    'pos_y': final_pos[2],
+                    'rotation_speed': random.uniform(-180, 180),
+                    'initial_rotation': random.uniform(0, 360),
+                    'is_aoe': True
+                }
+                self.explosions.append(explosion)
+
+                
+                
         
         # Track current phase
         if self.update_sequence_count <= self.boss_death_duration:
@@ -1816,16 +1873,21 @@ class Game(ShowBase):
             if random.random() < 0.5:
                 x = random.uniform(-self.aspect_ratio, self.aspect_ratio)
                 y = random.uniform(-1, 1)
-                self.create_explosion(x, y, is_aoe=True)
+                #self.create_explosion(x, y, is_aoe=True)
             
             if random.random() < 0.7:
                 offset_x = random.uniform(-0.5, 0.5)
                 offset_y = random.uniform(-0.5, 0.5)
-                self.create_explosion(
+                '''self.create_explosion(
                     self.boss_final_pos[0] + offset_x,
                     self.boss_final_pos[1] + offset_y,
                     is_aoe=True
-                )
+                )'''
+
+        # Remove boss just before explosion ends (about 10 frames before)
+        if self.update_sequence_count == self.boss_death_duration - 20:
+            self.boss.removeNode()
+            self.boss = None
 
         if self.update_sequence_count > total_frames:
             out(f"Death sequence complete", 3)
