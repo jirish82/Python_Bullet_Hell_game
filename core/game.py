@@ -1946,8 +1946,7 @@ class Game(ShowBase):
         """Handle the transition to town area"""
         from core.town import TownArea  # Update the import path
         
-        # Rest of the transition_to_town method remains the same
-        # Clean up combat area
+        # Clear ALL combat-related entities
         for enemy in self.enemies[:]:
             enemy.removeNode()
         self.enemies.clear()
@@ -1960,6 +1959,16 @@ class Game(ShowBase):
         for projectile in self.boss_projectiles[:]:
             projectile.removeNode()
         self.boss_projectiles.clear()
+        
+        # Make absolutely sure boss is gone
+        if self.boss:
+            self.boss.removeNode()
+        self.boss = None
+        self.boss_health = 0
+        
+        # Reset boss spawn timer to prevent immediate respawn
+        self.actual_game_time = 0
+        self.last_time_update = time.time()
         
         # Hide combat background
         self.background_node.hide()
