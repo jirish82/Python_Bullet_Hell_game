@@ -1,213 +1,92 @@
 from direct.showbase.ShowBase import ShowBase
-from direct.gui.OnscreenText import OnscreenText
 from direct.task import Task
-from panda3d.core import TextureStage, TransparencyAttrib, CardMaker, PNMImage, Texture, TextNode
-from panda3d.core import WindowProperties, InputDevice
-import math
-import random
-from utils.resource_loader import get_resource_path
-from utils.debug import out
+from panda3d.core import WindowProperties, InputDevice, CardMaker, TransparencyAttrib
 import time
 
+from utils.resource_loader import get_resource_path
+from utils.debug import out
+from core.town import TownArea
+
+from systems.player_system import PlayerSystem
+from systems.enemy_system import EnemySystem
+from systems.boss_system import BossSystem
+from systems.projectile_system import ProjectileSystem
+from systems.orb_system import OrbSystem
+from effects.effects_system import EffectsSystem
+from ui.ui_system import UISystem
 
 class Game(ShowBase):
     def __init__(self):
         ShowBase.__init__(self)
-
-        self.last_boss_break = 0
-        self.update_sequence_count = 0
-
-        self.town_area = None  # Will be initialized during transition
-        self.boss_death_duration = 180      # Time for explosions
-        self.white_fade_duration = 120      # Time to fade to white
-        self.white_screen_duration = 210    # Time to hold white
-        self.fade_duration = 60           # Time to fade to town
-
-        self.boss_death_sequence = False
-        self.boss_death_start_time = 0
-        self.screen_shake_intensity = 0.05
-        self.white_overlay = None
-        self.boss_final_pos = None  # Store boss position for death sequence
-
-        self.dying_boss = None  # Store the dying boss node
-        self.boss_death_shake_intensity = 0.02  # How much the boss shakes
-        self.boss_death_scale_start = 1.0
-        self.boss_death_scale_end = 1.3  # 30% size increase
-        self.boss_death_shake_frames = 120  # 2 seconds at 60fps
-
-        # Add with other game state variables
+        
+        # Game state
+        self.paused = True
+        self.game_over = False
         self.level = 1
-        self.base_speed_min = 0.001  # Store initial values
-        self.base_speed_max = 0.003
-        self.base_num_enemies = 5
-
+        self.score = 0
         self.actual_game_time = 0
         self.last_time_update = time.time()
-
-        #boss
-        self.boss = None
-        self.boss_health = 0
-        self.boss_spawn_time_base = 15
-        self.boss_spawn_time = self.boss_spawn_time_base  # Seconds before boss spawns
-        self.boss_hits_required = 10
-        self.boss_speed_multiplier = 0.5
-
-        #dash indicator
-        self.dash_indicator = None
-        self.create_dash_indicator()
-
-        # Add invincibility variables
-        self.is_invincible = False
-        self.invincibility_duration = 1.5
-        self.invincibility_start_time = 0
-        self.invincibility_flash_speed = 8.0  # Speed of the flashing effect
-
-        self.dash_trail_particles = []
-        self.dash_arc = None
-        self.dash_glow = None
-        self.trail_lifetime = 0.4  # Increased from 0.3
-        self.max_trail_particles = 15  # Increased from 10
-
-        self.dash_cooldown = 3  # Time between dashes
-        self.last_dash_time = 0
-        self.dash_distance = 0.6  # 30% of screen width
-        self.is_dashing = False
-        self.dash_duration = 0.15  # How long the dash animation lasts
-        self.dash_start_time = 0
-        self.dash_start_pos = None
-        self.dash_target_pos = None
-
-        # Add these new speed-related variables
-        self.speed_min_increase_rate = 0.0001  # per second
-        self.speed_max_increase_rate = 0.0002  # per second
         self.game_start_time = time.time()
-
-        self.speed_base_min = self.base_speed_min
-        self.speed_base_max = self.base_speed_max
-        self.num_enemies = self.base_num_enemies
-
-        # Initialize enemy-related variables first
-        self.enemy_limit = self.num_enemies  # Track max allowed enemies separately
-        self.enemies_per_score = 8  # Increase enemies every 10 points
-        self.previous_enemy_increase = 0  # Track when we last increased enemies
-
-        # Add orb-related variables
-        self.green_orb = None
-        self.orb_spawn_time = None
-        self.orb_duration = 2.0  # 3 seconds
-        self.orb_points_interval = 10  # Spawn orb every 10 points
-        self.last_orb_spawn_score = 0
-
-        self.blue_orb = None
-        self.blue_orb_spawn_time = None
-        self.blue_orb_duration = 3.0  # 3 seconds
-        self.blue_orb_interval = 11.0  # Spawn every 11 seconds
-        self.last_blue_orb_spawn_time = time.time()
-
-        self.score = 0
-        self.score_text = OnscreenText(
-            text="Score: 0",
-            pos=(-0.9, 0.9),  # Top left corner
-            scale=0.07,
-            fg=(1, 1, 1, 1),
-            align=TextNode.ALeft,
-            shadow=(0, 0, 0, 1)
-        )
-
-        self.game_over = False
-        self.game_over_text = OnscreenText(
-            text="GAME OVER\nPress START or P to restart",
-            pos=(0, 0),
-            scale=0.1,
-            fg=(1, 0, 0, 1),
-            shadow=(0, 0, 0, 1)
-        )
-        self.game_over_text.hide()
-
-        self.paused = True
-    
-        # Clear any existing bindings
-        self.ignore_all()
         
-        # Set up our pause controls
-        self.accept("start", self.custom_toggle_pause)
-        self.accept("gamepad-start", self.custom_toggle_pause)  # Try alternative name
-        self.accept("p", self.custom_toggle_pause)
+        # Initialize window properties
+        self.setup_window()
         
-        # Debug print for all inputs
-        def print_button(button):
-            out(f"Button pressed: {button}", 2)
-        self.accept("*", print_button)
-
-        self.pause_text = OnscreenText(
-            text="PAUSED",
-            pos=(0, 0),
-            scale=0.1,
-            fg=(1, 1, 1, 1),
-            shadow=(0, 0, 0, 1)
-        )
-        if self.paused:
-            self.pause_text.show()
-        else:
-            self.pause_text.hide()
-
-        # Calculate and store aspect ratio
-        props = self.win.getProperties()
-        self.aspect_ratio = props.getXSize() / props.getYSize()
-
-        # Add these new variables with your other initializations
-        self.explosions = []  # List to track active explosions
-        self.explosion_duration = 0.3  # Duration in seconds
-        self.explosion_data = {}  # Store start time and initial position for each explosion
-
-        self.enemies = []
-        self.max_enemy_speed = 0.01  # This is now the maximum speed
-        self.num_enemies = 10
+        # Load and set up background
+        self.setup_background()
         
-        # Dictionary to store enemy data
-        self.enemy_data = {}  # Will store speeds keyed by enemy node
+        # Initialize systems
+        self.ui_system = UISystem(self)
+        self.effects_system = EffectsSystem(self)
+        self.projectile_system = ProjectileSystem(self)
+        self.player_system = PlayerSystem(self)
+        self.enemy_system = EnemySystem(self)
+        self.boss_system = BossSystem(self)
+        self.orb_system = OrbSystem(self)
         
-        # Create initial enemies
-        self.spawn_enemies()    
-
-        # Initialize projectiles list
-        self.projectiles = []
-        self.projectile_speed = 0.03
-
-        # Add the boss projectile variables here, after projectile_speed is defined
-        self.boss_projectiles = []
-        self.boss_projectile_speed = self.projectile_speed / 6  # 1/3 of player projectile speed
-        self.boss_fire_rate = 0.8  # 4x second fire
-        self.boss_last_fire_time = 0
+        # Initialize town area
+        self.town_area = None
         
-        # Initialize trigger state
-        self.last_trigger_state = 0
-
-        # Add fire rate control
-        self.last_fire_time = 0
-        self.fire_rate = 0.1  # Time in seconds between shots (adjust this to control fire rate)
-
-        # Initialize gamepad
-        self.gamepad = None
-        self.initGamepad()
+        # Load sounds
+        self.load_sounds()
         
-        # Disable mouse control of the camera
-        self.disableMouse()
+        # Set up input handling
+        self.setup_input()
         
-        # Set up proper aspect ratio handling
+        # Show initial pause text since game starts paused
+        self.ui_system.show_pause()
+        
+        # Add the game loop update task
+        self.taskMgr.add(self.update, "gameUpdate")
+
+    def setup_window(self):
+        """Set up window properties and camera"""
         wp = WindowProperties()
         wp.setSize(1920, 1080)
         self.win.requestProperties(wp)
         
-        # Calculate aspect ratio
-        self.aspect_ratio = self.win.getXSize() / self.win.getYSize()
+        # Calculate and store aspect ratio
+        props = self.win.getProperties()
+        self.aspect_ratio = props.getXSize() / props.getYSize()
+        
+        # Disable mouse control of the camera
+        self.disableMouse()
         
         # Set up orthographic camera
         lens = self.cam.node().getLens()
         lens.setFov(0.5)
-        
-        # Load and play background music
+
+    def setup_background(self):
+        """Load and set up the game background"""
+        self.background = self.loader.loadTexture(get_resource_path("map.png"))
+        cm = CardMaker("background")
+        cm.setFrame(-self.aspect_ratio * 0.58, self.aspect_ratio * 0.8, -1, 1)
+        self.background_node = self.render2d.attachNewNode(cm.generate())
+        self.background_node.setTexture(self.background)
+
+    def load_sounds(self):
+        """Load and set up game sounds"""
         try:
+            # Background music
             self.music = self.loader.loadSfx(get_resource_path("music.mp3"))
             if self.music:
                 self.music.setLoop(True)
@@ -216,108 +95,41 @@ class Game(ShowBase):
                 self.music_playing = True
                 self.music_paused = False
                 self.music.stop()
-
-                # Add these after your music setup
-                self.enemy_death_sound = self.loader.loadSfx(get_resource_path("enemy_death.mp3"))
-                self.enemy_death_sound.setVolume(0.2)
-                self.gun_sound = self.loader.loadSfx(get_resource_path("gun.mp3"))
-                self.gun_sound.setVolume(0.03)
-            else:
-                out("Could not load music file")
-                self.music_playing = False
-                self.music_paused = False
+            
+            # Effect sounds
+            self.enemy_death_sound = self.loader.loadSfx(get_resource_path("enemy_death.mp3"))
+            self.enemy_death_sound.setVolume(0.2)
+            self.gun_sound = self.loader.loadSfx(get_resource_path("gun.mp3"))
+            self.gun_sound.setVolume(0.03)
+            self.dash_ready_sound = self.loader.loadSfx(get_resource_path("powerup1.mp3"))
+            self.dash_ready_sound.setVolume(0.8)
+            self.dash_sound = self.loader.loadSfx(get_resource_path("zoom.mp3"))
+            self.dash_sound.setVolume(0.8)
         except Exception as e:
-            out(f"Error loading music: {e}")
+            out(f"Error loading sounds: {e}")
             self.music_playing = False
             self.music_paused = False
 
-        try:
-            self.dash_ready_sound = self.loader.loadSfx(get_resource_path("powerup1.mp3"))
-            self.dash_ready_sound.setVolume(0.8)  # Adjust volume as needed
-        except Exception as e:
-            out(f"Error loading dash ready sound: {e}")
-            self.dash_ready_sound = None
-
-        try:
-            self.dash_sound = self.loader.loadSfx(get_resource_path("zoom.mp3"))
-            self.dash_sound.setVolume(0.8)  # Adjust volume as needed
-        except Exception as e:
-            out(f"Error loading dash sound: {e}")
-            self.dash_sound = None
-
-        # Load and set up the background
-        # Replace the current background setup code with:
-        self.background = self.loader.loadTexture(get_resource_path("map.png"))
-        cm = CardMaker("background")
-        # Use larger values to show more of the background
-        cm.setFrame(-self.aspect_ratio * 0.58, self.aspect_ratio * 0.8, -1, 1)
-        self.background_node = self.render2d.attachNewNode(cm.generate())
-        self.background_node.setTexture(self.background)
+    def setup_input(self):
+        """Set up input handling"""
+        # Clear any existing bindings
+        self.ignore_all()
         
-        # Load and set up the player sprite
-        cm = CardMaker("player")
-        player_size = 0.035
-        cm.setFrame(-player_size, player_size, -player_size, player_size)
-        self.player = self.render2d.attachNewNode(cm.generate())
-        player_tex = self.loader.loadTexture(get_resource_path("player.png"))
-        self.player.setTexture(player_tex)
-        self.player.setTransparency(TransparencyAttrib.MAlpha)
-
-        # Scale the player sprite based on the aspect ratio
-        self.player.setScale(self.aspect_ratio, 1, 2.5)  # Scale width by aspect ratio
-        
-        # Initialize player position and movement
-        self.player_pos = [0, 0]
-        self.movement_speed = 0.02
-        
-        # Set up key monitoring
-        self.keys = {}
-        for key in ['arrow_left', 'arrow_right', 'arrow_up', 'arrow_down']:
-            self.keys[key] = False
-        
-        # Set up key handlers
-        self.accept("arrow_left", self.updateKeyMap, ["arrow_left", True])
-        self.accept("arrow_left-up", self.updateKeyMap, ["arrow_left", False])
-        self.accept("arrow_right", self.updateKeyMap, ["arrow_right", True])
-        self.accept("arrow_right-up", self.updateKeyMap, ["arrow_right", False])
-        self.accept("arrow_up", self.updateKeyMap, ["arrow_up", True])
-        self.accept("arrow_up-up", self.updateKeyMap, ["arrow_up", False])
-        self.accept("arrow_down", self.updateKeyMap, ["arrow_down", True])
-        self.accept("arrow_down-up", self.updateKeyMap, ["arrow_down", False])
+        # Set up pause controls
+        self.accept("start", self.toggle_pause)
+        self.accept("gamepad-start", self.toggle_pause)
+        self.accept("p", self.toggle_pause)
         
         # Add fullscreen toggle and music controls
-        self.accept("f", self.toggleFullscreen)
-        self.accept("m", self.toggleMusic)
-        self.accept("p", self.togglePause)
+        self.accept("f", self.toggle_fullscreen)
+        self.accept("m", self.toggle_music)
         
-        # Add the game loop update task
-        self.taskMgr.add(self.update, "update")
+        # Initialize gamepad
+        self.gamepad = None
+        self.init_gamepad()
 
-        self.debug_text = OnscreenText(
-        text="",
-        pos=(self.aspect_ratio - 0.1, 0.9),  # Top right position
-        scale=0.04,
-        fg=(1, 1, 1, 1),  # White text
-        align=TextNode.ARight,
-        mayChange=True,
-        bg=(0, 0, 0, 0.5)  # Semi-transparent black background
-    )
-
-    def custom_toggle_pause(self):
-        if self.game_over:
-            self.restart_game()
-        else:
-            self.paused = not self.paused
-            if self.paused:
-                self.pause_text.show()
-                if hasattr(self, 'music') and self.music:
-                    self.music.stop()
-            else:
-                self.pause_text.hide()
-                if hasattr(self, 'music') and self.music:
-                    self.music.play()
-
-    def initGamepad(self):
+    def init_gamepad(self):
+        """Initialize gamepad if available"""
         devices = self.devices.getDevices(InputDevice.DeviceClass.gamepad)
         if devices:
             self.gamepad = devices[0]
@@ -325,1658 +137,133 @@ class Game(ShowBase):
             out(f"Gamepad connected: {self.gamepad.name}", 2)
             
             # Set up gamepad button handlers
-            self.accept("gamepad-face_a", self.toggleMusic)
-            self.accept("gamepad-face_b", self.togglePause)
-            self.accept("gamepad-face_y", self.toggleFullscreen)
-
-            # Try multiple possible shoulder button names
-            possible_buttons = [
-                "gamepad-right_shoulder",
-                "gamepad-rshoulder",
-                "gamepad-r1",
-                "gamepad-shoulder_right",
-                "gamepad-rtrigger"
-            ]
+            self.accept("gamepad-face_a", self.toggle_music)
+            self.accept("gamepad-face_b", self.toggle_pause)
+            self.accept("gamepad-face_y", self.toggle_fullscreen)
             
-            for button in possible_buttons:
-                out(f"Attempting to bind to button: {button}", 2)
-                self.accept(button, self.debug_button)
-        else:
-            out("No gamepad detected", 2)
+            # Handle dash with right shoulder button
+            self.accept("gamepad-right_shoulder", self.handle_dash)
+
+    def handle_dash(self):
+        """Handle gamepad dash input"""
+        if self.gamepad:
+            left_x = self.gamepad.findAxis(InputDevice.Axis.left_x).value
+            left_y = self.gamepad.findAxis(InputDevice.Axis.left_y).value
+            self.player_system.perform_dash(left_x, left_y)
+
+    def update(self, task):
+        """Main game update loop"""
+        # Update game time
+        current_time = time.time()
+        if not self.paused and not self.game_over:
+            self.actual_game_time += current_time - self.last_time_update
+        self.last_time_update = current_time
         
-    def toggleMusic(self):
-        if hasattr(self, 'music') and self.music:
+        # Check for boss spawn
+        if (self.actual_game_time >= self.boss_system.boss_spawn_time and 
+            not self.boss_system.boss and not self.game_over):
+            self.boss_system.spawn_boss()
+        
+        # Update all systems
+        self.player_system.update(task)
+        self.enemy_system.update(task)
+        self.boss_system.update(task)
+        self.projectile_system.update(task)
+        self.orb_system.update(task)
+        self.effects_system.update_explosions(task)
+        self.ui_system.update_debug_text()
+        
+        return Task.cont
+
+    def toggle_pause(self):
+        """Toggle game pause state"""
+        if self.game_over:
+            self.restart_game()
+        else:
+            self.paused = not self.paused
+            if self.paused:
+                self.ui_system.show_pause()
+                if self.music:
+                    self.music.stop()
+            else:
+                self.ui_system.hide_pause()
+                if self.music:
+                    self.music.play()
+
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode"""
+        wp = self.win.getProperties()
+        wp2 = WindowProperties()
+        wp2.setFullscreen(not wp.getFullscreen())
+        self.win.requestProperties(wp2)
+
+    def toggle_music(self):
+        """Toggle music on/off"""
+        if self.music:
             if self.music_playing:
                 self.music.setVolume(0)
                 self.music_playing = False
             else:
                 self.music.setVolume(0.3)
                 self.music_playing = True
-            
-    def togglePause(self):
-        if hasattr(self, 'music') and self.music:
-            if self.music_paused:
-                self.music.play()
-                self.music_paused = False
-            else:
-                self.music.stop()
-                self.music_paused = True
-        
-    def toggleFullscreen(self):
-        wp = self.win.getProperties()
-        wp2 = WindowProperties()
-        wp2.setFullscreen(not wp.getFullscreen())
-        self.win.requestProperties(wp2)
-        
-    def updateKeyMap(self, key, value):
-        self.keys[key] = value
-        
-    def update(self, task):
-
-        if self.boss_death_sequence:
-            self.update_boss_death_sequence(task)
-            # Return here only if we don't want any other updates during death sequence
-            return task.cont
-    
-        if self.paused or self.game_over:
-            return task.cont
-
-        # Replace the current boss spawn check with these lines
-        current_time = time.time()
-        
-        # Update actual game time (not affected by blue orbs)
-        if not self.paused and not self.game_over:
-            self.actual_game_time += current_time - self.last_time_update
-        self.last_time_update = current_time
-        
-        # Check for boss spawn using actual_game_time
-        if self.actual_game_time >= self.boss_spawn_time and not self.boss and not self.game_over:
-            self.spawn_boss()
-
-        # Add this line here
-        if self.boss:
-            self.update_boss()
-
-        # Update dash animation
-        self.update_dash(task)
-        
-        # Handle keyboard input
-        dx = 0
-        dy = 0
-        
-        if self.keys["arrow_left"]:
-            dx -= self.movement_speed
-        if self.keys["arrow_right"]:
-            dx += self.movement_speed
-        if self.keys["arrow_up"]:
-            dy += self.movement_speed
-        if self.keys["arrow_down"]:
-            dy -= self.movement_speed
-            
-        # Handle gamepad input
-        if self.gamepad:
-            # Left analog stick
-            left_x = self.gamepad.findAxis(InputDevice.Axis.left_x).value
-            left_y = self.gamepad.findAxis(InputDevice.Axis.left_y).value
-            
-            # Add deadzone
-            deadzone = 0.2
-            if abs(left_x) < deadzone: left_x = 0
-            if abs(left_y) < deadzone: left_y = 0
-            
-            # Add gamepad movement
-            dx += left_x * self.movement_speed
-            dy += left_y * self.movement_speed
-            
-            # D-pad support
-            if self.gamepad.findButton("dpad_left").pressed:
-                dx -= self.movement_speed
-            if self.gamepad.findButton("dpad_right").pressed:
-                dx += self.movement_speed
-            if self.gamepad.findButton("dpad_up").pressed:
-                dy += self.movement_speed
-            if self.gamepad.findButton("dpad_down").pressed:
-                dy -= self.movement_speed
-        
-        # Update position
-        self.player_pos[0] += dx
-        self.player_pos[1] += dy
-            
-        # Clamp position to screen bounds
-        self.player_pos[0] = max(-self.aspect_ratio + 0.05, min(self.aspect_ratio - 0.05, self.player_pos[0]))
-        self.player_pos[1] = max(-0.95, min(0.95, self.player_pos[1]))
-        
-        # Update player sprite position
-        self.player.setPos(self.player_pos[0], 0, self.player_pos[1])
-
-        # Handle projectile firing with right analog stick + trigger
-        if self.gamepad:
-            right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
-            right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
-            trigger_value = self.gamepad.findAxis(InputDevice.Axis.right_trigger).value
-            stick_magnitude = math.sqrt(right_x * right_x + right_y * right_y)
-            current_time = task.time
-            
-            deadzone = 0.2
-            if (stick_magnitude > deadzone and 
-                #trigger_value > 0.5 and 
-                current_time - self.last_fire_time >= self.fire_rate):
-                direction_x = right_x / stick_magnitude
-                direction_y = right_y / stick_magnitude
-                self.createProjectile(direction_x, direction_y)
-                self.gun_sound.play()
-                self.last_fire_time = current_time
-
-            # Handle dash with right shoulder button
-            right_shoulder = self.gamepad.findButton("right_shoulder")
-            if right_shoulder:
-                out(f"Update method - Right shoulder button state: {right_shoulder.pressed}", 2)
-                if right_shoulder.pressed:
-                    right_x = self.gamepad.findAxis(InputDevice.Axis.right_x).value
-                    right_y = self.gamepad.findAxis(InputDevice.Axis.right_y).value
-                    out(f"Update method - Dash triggered with stick values: {right_x}, {right_y}", 2)
-                    self.perform_dash(right_x, right_y)
-
-        # Update projectiles
-        for projectile in self.projectiles[:]:
-            current_pos = projectile.getPos()
-            direction = projectile.getPythonTag("direction")
-            new_x = current_pos[0] + direction[0] * self.projectile_speed
-            new_z = current_pos[2] + direction[1] * self.projectile_speed
-            projectile.setPos(new_x, 0, new_z)
-            
-            if (new_x > self.aspect_ratio + 0.1 or 
-                new_x < -self.aspect_ratio - 0.1 or 
-                new_z > 1.1 or 
-                new_z < -1.1):
-                projectile.removeNode()
-                self.projectiles.remove(projectile)
-
-        for projectile in self.boss_projectiles[:]:
-            current_pos = projectile.getPos()
-            direction = projectile.getPythonTag("direction")
-            new_x = current_pos[0] + direction[0] * self.boss_projectile_speed
-            new_z = current_pos[2] + direction[1] * self.boss_projectile_speed
-            projectile.setPos(new_x, 0, new_z)
-            
-            # Remove if off screen
-            if (new_x > self.aspect_ratio + 0.1 or 
-                new_x < -self.aspect_ratio - 0.1 or 
-                new_z > 1.1 or 
-                new_z < -1.1):
-                projectile.removeNode()
-                self.boss_projectiles.remove(projectile)
-                continue
-            
-            # Check collision with player
-            if (not self.is_invincible and
-                abs(self.player_pos[0] - new_x) < 0.1 and 
-                abs(self.player_pos[1] - new_z) < 0.1):
-                self.game_over = True
-                self.game_over_text.show()
-                self.paused = True
-                if hasattr(self, 'music') and self.music:
-                    self.music.stop()
-
-        # Update invincibility
-        current_time = time.time()
-        if self.is_invincible:
-            time_in_invincibility = current_time - self.invincibility_start_time
-            if time_in_invincibility >= self.invincibility_duration:
-                self.is_invincible = False
-                self.player.setColorScale(1, 1, 1, 1)  # Reset color
-            else:
-                # Create flashing effect
-                flash = (math.sin(time_in_invincibility * self.invincibility_flash_speed) * 0.3) + 0.7
-                self.player.setColorScale(1, 1, flash, 1)  # Blue-tinted flash
-        
-        # Update enemies with modified collision check
-        for enemy in self.enemies[:]:
-            enemy_pos = enemy.getPos()
-            player_pos = (self.player_pos[0], self.player_pos[1])
-            
-            dx = player_pos[0] - enemy_pos[0]
-            dy = player_pos[1] - enemy_pos[2]
-            
-            distance = math.sqrt(dx * dx + dy * dy)
-            if distance > 0:
-                dx /= distance
-                dy /= distance
-            
-            enemy_speed = self.enemy_data[enemy]
-            new_x = enemy_pos[0] + dx * enemy_speed
-            new_y = enemy_pos[2] + dy * enemy_speed
-            
-            new_x = max(min(new_x, self.aspect_ratio - 0.05), -self.aspect_ratio + 0.05)
-            new_y = max(min(new_y, 0.95), -0.95)
-            
-            enemy.setPos(new_x, 0, new_y)
-            
-            # Check collision with player
-            if (abs(self.player_pos[0] - new_x) < 0.07 and 
-                abs(self.player_pos[1] - new_y) < 0.07):
-                if self.is_invincible:
-                    # Destroy enemy if player is invincible
-                    self.create_explosion(new_x, new_y)
-                    self.score += 1
-                    self.score_text.setText(f"Score: {self.score}")
-                    self.check_difficulty_increase()
-                    self.enemy_data.pop(enemy)
-                    enemy.removeNode()
-                    self.enemies.remove(enemy)
-                    self.enemy_death_sound.play()
-                    if len(self.enemies) < self.enemy_limit:
-                        self.spawn_single_enemy()
-                else:
-                    # Game over if player is not invincible
-                    self.game_over = True
-                    self.game_over_text.show()
-                    self.paused = True
-                    if hasattr(self, 'music') and self.music:
-                        self.music.stop()
-        
-        # Check for projectile-enemy collisions
-        for projectile in self.projectiles[:]:
-            proj_pos = projectile.getPos()
-
-            # Add boss collision check here, before the regular enemy check
-            if self.boss:
-                boss_pos = self.boss.getPos()
-                # Use larger collision radius for boss (0.3 instead of 0.07)
-                if (abs(proj_pos[0] - boss_pos[0]) < 0.3 and 
-                    abs(proj_pos[2] - boss_pos[2]) < 0.3):
-                    self.create_explosion(boss_pos[0], boss_pos[2])
-                    self.boss_health -= 1
-                    projectile.removeNode()
-                    self.projectiles.remove(projectile)
-                    self.enemy_death_sound.play()
-                    
-                    if self.boss_health <= 0:
-
-                        current_time = time.time()
-                        out(f"[{current_time:.3f}] Boss health reached 0, starting death sequence", 3)
-                        boss_pos = self.boss.getPos()
-                        out(f"[{current_time:.3f}] Boss final position: ({boss_pos[0]:.2f}, {boss_pos[2]:.2f})", 3)
-                        self.start_boss_death_sequence((boss_pos[0], boss_pos[2]))
-                        self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
-                        out(f"[{current_time:.3f}] Created initial boss death explosion", 3)
-                        self.score += 10
-                        self.score_text.setText(f"Score: {self.score}")
-                        #self.boss.removeNode()
-                        #self.boss = None
-                        self.enemy_death_sound.play()
-
-                        # Wait until death sequence is complete to proceed
-                        taskMgr.doMethodLater(self.boss_death_duration, self.complete_boss_death, 'complete_boss_death')
-                        
-                        # Increment level and increase base difficulties by 10%
-                        self.level += 1
-                        self.base_speed_min *= 1.1
-                        self.base_speed_max *= 1.1
-                        self.base_num_enemies = max(int(self.base_num_enemies * 1.1), self.base_num_enemies + 1)
-                        
-                        # Reset current values to new base values
-                        self.speed_min = self.base_speed_min
-                        self.speed_max = self.base_speed_max
-                        self.num_enemies = self.base_num_enemies
-                        
-                        # Reset speed increase over time
-                        self.game_start_time = time.time()
-                        self.speed_base_max = self.speed_max
-                        
-                        # Reset game time tracking for next boss
-                        #self.actual_game_time = 0
-                        self.last_time_update = time.time()
-                        
-                        # Increase boss spawn time by the initial spawn time
-                        self.boss_spawn_time += self.boss_spawn_time_base  # Add another 5 seconds each level
-                    continue
-
-            for enemy in self.enemies[:]:
-                enemy_pos = enemy.getPos()
-                if (abs(proj_pos[0] - enemy_pos[0]) < 0.07 and 
-                    abs(proj_pos[2] - enemy_pos[2]) < 0.07):
-                    self.create_explosion(enemy_pos[0], enemy_pos[2])
-                    self.score += 1
-                    self.score_text.setText(f"Score: {self.score}")
-                    self.check_difficulty_increase()
-                    self.enemy_data.pop(enemy)
-                    enemy.removeNode()
-                    projectile.removeNode()
-                    self.enemies.remove(enemy)
-                    self.enemy_death_sound.play()
-                    self.projectiles.remove(projectile)
-                    # Only spawn new enemy if we're below the current enemy limit
-                    if len(self.enemies) < self.enemy_limit:
-                        self.spawn_single_enemy()
-                    break
-        
-        # Update explosions
-        self.update_explosions(task)
-
-        self.update_orb()
-        self.check_orb_collection()
-
-        self.update_blue_orb()
-        self.check_blue_orb_collection()
-
-        self.update_debug_text()
-        
-        return Task.cont
-
-    def createProjectile(self, direction_x, direction_y):
-        cm = CardMaker("projectile")
-        projectile_size = 0.02
-        cm.setFrame(-projectile_size, projectile_size, -projectile_size, projectile_size)
-        projectile = self.render2d.attachNewNode(cm.generate())
-        
-        projectile_tex = self.loader.loadTexture(get_resource_path("orb.png"))
-        projectile.setTexture(projectile_tex)
-        projectile.setTransparency(TransparencyAttrib.MAlpha)
-        
-        projectile.setPos(self.player_pos[0], 0, self.player_pos[1])
-        projectile.setPythonTag("direction", (direction_x, direction_y))
-        self.projectiles.append(projectile)
-
-    def spawn_enemies(self):
-        for _ in range(self.num_enemies):
-            side = random.choice(['top', 'bottom', 'left', 'right'])
-            enemy_size = 0.1
-            buffer = 0.1  # Small buffer distance outside the screen
-
-            # Calculate spawn position based on side
-            if side == 'top':
-                x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-                y = 1 + buffer
-            elif side == 'bottom':
-                x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-                y = -1 - buffer
-            elif side == 'left':
-                x = -self.aspect_ratio - buffer
-                y = random.uniform(-1 + enemy_size, 1 - enemy_size)
-            else:  # right
-                x = self.aspect_ratio + buffer
-                y = random.uniform(-1 + enemy_size, 1 - enemy_size)
-
-            # Create the enemy
-            cm = CardMaker("enemy")
-            cm.setFrame(-enemy_size, enemy_size, -enemy_size, enemy_size)
-            enemy = self.render2d.attachNewNode(cm.generate())
-            enemy_tex = self.loader.loadTexture(get_resource_path("enemy.png"))
-            enemy.setTexture(enemy_tex)
-            enemy.setTransparency(TransparencyAttrib.MAlpha)
-            enemy.setPos(x, 0, y)
-            
-            # Calculate time-based speed limits
-            seconds_elapsed = time.time() - self.game_start_time
-            current_min = self.speed_base_min + (self.speed_min_increase_rate * seconds_elapsed)
-            current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
-            
-            # Random speed between current limits
-            speed = random.uniform(current_min, current_max)
-            self.enemy_data[enemy] = speed
-            self.enemies.append(enemy)
-
-    def spawn_single_enemy(self):
-        side = random.choice(['top', 'bottom', 'left', 'right'])
-        enemy_size = 0.1
-        buffer = 0.1  # Small buffer distance outside the screen
-
-        # Calculate spawn position based on side
-        if side == 'top':
-            x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = 1 + buffer
-        elif side == 'bottom':
-            x = random.uniform(-self.aspect_ratio + enemy_size, self.aspect_ratio - enemy_size)
-            y = -1 - buffer
-        elif side == 'left':
-            x = -self.aspect_ratio - buffer
-            y = random.uniform(-1 + enemy_size, 1 - enemy_size)
-        else:  # right
-            x = self.aspect_ratio + buffer
-            y = random.uniform(-1 + enemy_size, 1 - enemy_size)
-
-        # Create the enemy
-        cm = CardMaker("enemy")
-        cm.setFrame(-enemy_size, enemy_size, -enemy_size, enemy_size)
-        enemy = self.render2d.attachNewNode(cm.generate())
-        enemy_tex = self.loader.loadTexture(get_resource_path("enemy.png"))
-        enemy.setTexture(enemy_tex)
-        enemy.setTransparency(TransparencyAttrib.MAlpha)
-        enemy.setPos(x, 0, y)
-        
-        # Calculate time-based speed limits
-        seconds_elapsed = time.time() - self.game_start_time
-        current_min = self.speed_base_min + (self.speed_min_increase_rate * seconds_elapsed)
-        current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
-        
-        # Random speed between current limits
-        speed = random.uniform(current_min, current_max)
-        self.enemy_data[enemy] = speed
-        self.enemies.append(enemy)
-
-    def create_explosion(self, pos_x, pos_y, is_aoe=False):
-        current_time = time.time()
-        if self.boss_death_sequence:
-            explosion_size = 0.4
-            out(f"[{current_time:.3f}] Creating death sequence explosion size {explosion_size} at ({pos_x:.2f}, {pos_y:.2f})", 3)
-        else:
-            explosion_size = 0.3 if is_aoe else 0.2
-            out(f"[{current_time:.3f}] Creating regular explosion size {explosion_size} at ({pos_x:.2f}, {pos_y:.2f})", 3)
-
-        cm = CardMaker("explosion")
-        cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
-        explosion = self.render2d.attachNewNode(cm.generate())
-        
-        texture_size = 128
-        image = PNMImage(texture_size, texture_size, 4)
-        center_x = texture_size // 2
-        center_y = texture_size // 2
-        radius = texture_size // 2
-        
-        image.fill(0, 0, 0)
-        image.alphaFill(0)
-        
-        # Use different colors for AoE explosions
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                if distance <= radius:
-                    intensity = 1.0 - (distance / radius)
-                    noise = random.uniform(0.8, 1.0)
-                    intensity = intensity * noise
-                    
-                    if is_aoe:
-                        # Blue-white explosion for AoE
-                        if distance < radius * 0.3:
-                            image.setXel(x, y, 0.9, 0.95, 1.0)  # White-blue core
-                        elif distance < radius * 0.6:
-                            image.setXel(x, y, 0.4, 0.6, 1.0)  # Bright blue
-                        else:
-                            image.setXel(x, y, 0.2, 0.4, 0.8)  # Darker blue
-                    else:
-                        # Original orange explosion for dash hits
-                        if distance < radius * 0.3:
-                            image.setXel(x, y, 1.0, 1.0, 0.7)
-                        elif distance < radius * 0.6:
-                            image.setXel(x, y, 1.0, 0.5, 0.0)
-                        else:
-                            image.setXel(x, y, 1.0, 0.2, 0.0)
-                    
-                    if distance > radius * 0.7:
-                        edge_factor = 1.0 - ((distance - radius * 0.7) / (radius * 0.3))
-                        intensity *= edge_factor
-                    
-                    image.setAlpha(x, y, intensity)
-        
-        texture = Texture()
-        texture.load(image)
-        explosion.setTexture(texture)
-        
-        explosion.setBin('fixed', 100)
-        explosion.setDepthTest(False)
-        explosion.setDepthWrite(False)
-        explosion.setTransparency(TransparencyAttrib.MAlpha)
-        explosion.setPos(pos_x, 0, pos_y)
-        
-        initial_rotation = random.uniform(0, 360)
-        explosion.setR(initial_rotation)
-        
-        self.explosion_data[explosion] = {
-            'start_time': globalClock.getFrameTime(),
-            'pos_x': pos_x,
-            'pos_y': pos_y,
-            'rotation_speed': random.uniform(-180, 180),
-            'initial_rotation': initial_rotation,
-            'is_aoe': is_aoe
-        }
-        
-        self.explosions.append(explosion)
-
-    def update_explosions(self, task, is_aoe = False):
-        current_time = time.time()
-        if self.paused and not self.boss_death_sequence:
-            out(f"[{current_time:.3f}] Explosions paused (not in death sequence)", 3)
-            return task.cont
-        
-        frame_time = globalClock.getFrameTime()
-        
-        for explosion in self.explosions[:]:
-            if explosion not in self.explosion_data:
-                out(f"[{current_time:.3f}] Explosion missing from data!", 3)
-                continue
-                
-            data = self.explosion_data[explosion]
-            age = frame_time - data['start_time']
-            
-            # Use custom duration if specified, otherwise use default
-            duration = data.get('duration', self.explosion_duration)
-            
-            if age > duration:
-                out(f"[{current_time:.3f}] Removing aged explosion", 3)
-                explosion.removeNode()
-                self.explosions.remove(explosion)
-                self.explosion_data.pop(explosion)
-                continue
-            
-            progress = age / duration
-            
-            # Use custom scaling if specified
-            if 'start_scale' in data and 'end_scale' in data:
-                # Use easeInOutQuad for smoother scaling
-                if progress < 0.5:
-                    current_scale = data['start_scale'] + (data['end_scale'] - data['start_scale']) * (2 * progress * progress)
-                else:
-                    progress = progress * 2 - 1
-                    current_scale = data['start_scale'] + (data['end_scale'] - data['start_scale']) * (1 - 0.5 * (1 - progress) * (1 - progress))
-                explosion.setScale(current_scale)
-            else:
-                # Original scaling behavior for normal explosions
-                scale_factor = math.sin(progress * math.pi) * 0.5 + 0.5
-                base_size = 0.4 if is_aoe else 0.3
-                max_size = 0.8 if is_aoe else 0.6
-                current_size = base_size + (max_size * scale_factor)
-                explosion.setScale(current_size)
-            
-            rotation = data['initial_rotation'] + (data['rotation_speed'] * age)
-            explosion.setR(rotation)
-            
-            if progress < 0.3:
-                intensity = 1.0
-            else:
-                intensity = 1.0 - ((progress - 0.3) / 0.7)
-                pulse = math.sin(progress * 20) * 0.1
-                intensity = max(0, min(1, intensity + pulse))
-            
-            explosion.setColorScale(1, 1, 1, intensity)
-        
-        return task.cont
 
     def restart_game(self):
-
+        """Restart the game"""
         self.actual_game_time = 0
         self.last_time_update = time.time()
         self.game_start_time = time.time()
-
-        #remvoe boss projectiles
-        for projectile in self.boss_projectiles:
-            projectile.removeNode()
-        self.boss_projectiles.clear()
-        self.boss_last_fire_time = 0
-
-        if self.boss:
-            self.boss.removeNode()
-            self.boss = None
-
-        if self.dash_indicator:
-            self.dash_indicator.show()
-        self.last_dash_time = 0  # Reset dash cooldown
-
+        self.level = 1
+        self.score = 0
+        
         # Reset game state
         self.game_over = False
-        self.game_over_text.hide()
-        self.pause_text.hide()
+        self.ui_system.hide_game_over()
+        self.ui_system.hide_pause()
         self.paused = False
-
-        self.boss_spawn_time = self.boss_spawn_time_base
-
-        # Reset level and base difficulties if it's a full restart
-        self.level = 1
-            
         
-        # Set current values to base values
-        self.speed_base_min = self.base_speed_min
-        self.speed_base_max = self.base_speed_max
-        self.num_enemies = self.base_num_enemies
-
-        # Reset invincibility
-        self.is_invincible = False
-        self.player.setColorScale(1, 1, 1, 1)  # Reset color
-
-        self.enemy_limit = self.base_num_enemies
-        if self.green_orb:
-            self.green_orb.removeNode()
-            self.green_orb = None
-        self.last_orb_spawn_score = 0
-
-        if self.blue_orb:
-            self.blue_orb.removeNode()
-            self.blue_orb = None
-        self.last_blue_orb_spawn_time = time.time()
-
-        # Reset speed-related variables
-        self.game_start_time = time.time()
+        # Reset all systems
+        self.player_system.cleanup()
+        self.enemy_system.reset()
+        self.boss_system.cleanup()
+        self.projectile_system.cleanup()
+        self.orb_system.cleanup()
+        self.effects_system.cleanup()
         
-        # Reset score and difficulty
-        self.score = 0
-        self.num_enemies = self.base_num_enemies  # Reset to initial number of enemies
-        self.previous_enemy_increase = 0  # Reset difficulty tracking
-        self.score_text.setText(f"Score: {self.score}")
+        # Reinitialize systems as needed
+        self.player_system = PlayerSystem(self)
         
-        # Reset player position
-        self.player_pos = [0, 0]
-        self.player.setPos(0, 0, 0)
-        
-        # Clear existing enemies and projectiles
-        for enemy in self.enemies:
-            enemy.removeNode()
-        self.enemies.clear()
-        self.enemy_data.clear()
-        
-        for projectile in self.projectiles:
-            projectile.removeNode()
-        self.projectiles.clear()
-        
-        # Respawn initial enemies
-        self.spawn_enemies()
-        
-        # Restart music if it exists
-        if hasattr(self, 'music') and self.music:
+        # Restart music
+        if self.music:
             self.music.play()
 
-    def check_difficulty_increase(self):
-        difficulty_level = self.score // self.enemies_per_score
-        if difficulty_level > self.previous_enemy_increase:
-            # Increase both the limit and current number
-            self.num_enemies += 1
-            self.enemy_limit = self.num_enemies  # Update the limit too
-            self.previous_enemy_increase = difficulty_level
-            
-            # Spawn the additional enemy immediately
-            self.spawn_single_enemy()
-
-    def create_green_orb(self):
-        if self.green_orb:  # Remove existing orb if there is one
-            self.green_orb.removeNode()
-            
-        cm = CardMaker("green_orb")
-        orb_size = 0.05
-        cm.setFrame(-orb_size, orb_size, -orb_size, orb_size)
-        self.green_orb = self.render2d.attachNewNode(cm.generate())
-        
-        # Create a more vibrant green glowing texture
-        texture_size = 128  # Increased texture size for better quality
-        image = PNMImage(texture_size, texture_size, 4)
-        center_x = texture_size // 2
-        center_y = texture_size // 2
-        radius = texture_size // 2
-        
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                if distance <= radius:
-                    intensity = 1.0 - (distance / radius)
-                    # Make the glow effect stronger
-                    intensity = intensity ** 0.5  # This makes the falloff less steep
-                    
-                    # Bright core
-                    if distance < radius * 0.3:
-                        # White-green center
-                        image.setXel(x, y, 0.8, 1.0, 0.8)
-                        image.setAlpha(x, y, 1.0)
-                    else:
-                        # Vibrant green glow
-                        image.setXel(x, y, 0.2, 1.0, 0.2)
-                        image.setAlpha(x, y, min(1.0, intensity * 1.5))  # Increased alpha
-                else:
-                    image.setAlpha(x, y, 0)
-        
-        texture = Texture()
-        texture.load(image)
-        self.green_orb.setTexture(texture)
-        self.green_orb.setTransparency(TransparencyAttrib.MAlpha)
-        
-        # Make it render on top of other elements
-        self.green_orb.setBin('fixed', 100)
-        self.green_orb.setDepthTest(False)
-        self.green_orb.setDepthWrite(False)
-        
-        # Random position within visible bounds, now 10% more constrained
-        x = random.uniform(-self.aspect_ratio * 0.9 + 0.1, self.aspect_ratio * 0.9 - 0.1)
-        y = random.uniform(-0.8, 0.8)  # Changed from -0.9, 0.9 to -0.8, 0.8
-        self.green_orb.setPos(x, 0, y)
-        
-        self.orb_spawn_time = time.time()
-        
-        # Add pulsing effect
-        self.orb_scale = 1.0
-        taskMgr.add(self.pulse_orb, "pulseOrb")
-
-    def pulse_orb(self, task):
-        if not self.green_orb:
-            return Task.done
-        
-        pulse_speed = 3.0  # Adjust this to change pulse speed
-        pulse_magnitude = 0.2  # Adjust this to change pulse size
-        
-        # Calculate scale based on sine wave
-        base_scale = 1.0
-        pulse = math.sin(task.time * pulse_speed) * pulse_magnitude
-        new_scale = base_scale + pulse
-        
-        self.green_orb.setScale(new_scale)
-        
-        return Task.cont
-
-    def check_orb_collection(self):
-        if not self.green_orb:
-            return
-            
-        orb_pos = self.green_orb.getPos()
-        if (abs(self.player_pos[0] - orb_pos[0]) < 0.1 and 
-            abs(self.player_pos[1] - orb_pos[2]) < 0.1):
-            # Collected the orb
-            if self.enemy_limit > 1:  # Don't go below 1 enemy
-                self.enemy_limit -= 1
-            self.green_orb.removeNode()
-            self.green_orb = None
-
-    def update_orb(self):
-        current_time = time.time()
-        
-        # Check if we should spawn a new orb
-        if self.score > 0 and self.score % self.orb_points_interval == 0 and self.score != self.last_orb_spawn_score:
-            self.create_green_orb()
-            self.last_orb_spawn_score = self.score
-        
-        # Remove orb if it's been there too long
-        if self.green_orb and self.orb_spawn_time:
-            if current_time - self.orb_spawn_time > self.orb_duration:
-                self.green_orb.removeNode()
-                self.green_orb = None
-
-    def create_blue_orb(self):
-        if self.blue_orb:  # Remove existing orb if there is one
-            self.blue_orb.removeNode()
-            
-        cm = CardMaker("blue_orb")
-        orb_size = 0.05
-        cm.setFrame(-orb_size, orb_size, -orb_size, orb_size)
-        self.blue_orb = self.render2d.attachNewNode(cm.generate())
-        
-        # Create a vibrant blue glowing texture
-        texture_size = 128
-        image = PNMImage(texture_size, texture_size, 4)
-        center_x = texture_size // 2
-        center_y = texture_size // 2
-        radius = texture_size // 2
-        
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                if distance <= radius:
-                    intensity = 1.0 - (distance / radius)
-                    intensity = intensity ** 0.5
-                    
-                    if distance < radius * 0.3:
-                        # White-blue center
-                        image.setXel(x, y, 0.8, 0.8, 1.0)
-                        image.setAlpha(x, y, 1.0)
-                    else:
-                        # Vibrant blue glow
-                        image.setXel(x, y, 0.2, 0.2, 1.0)
-                        image.setAlpha(x, y, min(1.0, intensity * 1.5))
-                else:
-                    image.setAlpha(x, y, 0)
-        
-        texture = Texture()
-        texture.load(image)
-        self.blue_orb.setTexture(texture)
-        self.blue_orb.setTransparency(TransparencyAttrib.MAlpha)
-        
-        self.blue_orb.setBin('fixed', 100)
-        self.blue_orb.setDepthTest(False)
-        self.blue_orb.setDepthWrite(False)
-        
-        # Random position within visible bounds, 10% constrained
-        x = random.uniform(-self.aspect_ratio * 0.9 + 0.1, self.aspect_ratio * 0.9 - 0.1)
-        y = random.uniform(-0.8, 0.8)
-        self.blue_orb.setPos(x, 0, y)
-        
-        self.blue_orb_spawn_time = time.time()
-        
-        taskMgr.add(self.pulse_blue_orb, "pulseBlueOrb")
-
-    def pulse_blue_orb(self, task):
-        if not self.blue_orb:
-            return Task.done
-        
-        pulse_speed = 3.0
-        pulse_magnitude = 0.2
-        
-        base_scale = 1.0
-        pulse = math.sin(task.time * pulse_speed) * pulse_magnitude
-        new_scale = base_scale + pulse
-        
-        self.blue_orb.setScale(new_scale)
-        
-        return Task.cont
-
-    def check_blue_orb_collection(self):
-        if not self.blue_orb:
-            return
-            
-        orb_pos = self.blue_orb.getPos()
-        if (abs(self.player_pos[0] - orb_pos[0]) < 0.1 and 
-            abs(self.player_pos[1] - orb_pos[2]) < 0.1):
-            # Collected the blue orb - add 10 seconds to game_start_time
-            self.game_start_time += 10
-            self.blue_orb.removeNode()
-            self.blue_orb = None
-
-    def update_blue_orb(self):
-        current_time = time.time()
-        
-        # Check if we should spawn a new blue orb
-        if current_time - self.last_blue_orb_spawn_time >= self.blue_orb_interval:
-            self.create_blue_orb()
-            self.last_blue_orb_spawn_time = current_time
-        
-        # Remove orb if it's been there too long
-        if self.blue_orb and self.blue_orb_spawn_time:
-            if current_time - self.blue_orb_spawn_time > self.blue_orb_duration:
-                self.blue_orb.removeNode()
-                self.blue_orb = None
-
-    def update_debug_text(self):
-        # Modify your debug text to show both timers
-        current_time = time.time()
-        effective_time = current_time - self.game_start_time
-        
-        debug_str = (
-            f"Enemy Limit: {self.enemy_limit}\n"
-            f"Game Time: {effective_time:.1f}s\n"
-            f"Boss Time: {self.actual_game_time:.1f}s\n"
-            f"Level: {self.level}"
-        )
-        
-        self.debug_text.setText(debug_str)
-
-    def perform_dash(self, direction_x, direction_y):
-
-        # Play dash sound
-        if hasattr(self, 'dash_sound') and self.dash_sound:
-            self.dash_sound.play()
-
-        current_time = time.time()
-        out(f"Dash attempt - direction: ({direction_x}, {direction_y})", 2)
-        
-        if current_time - self.last_dash_time < self.dash_cooldown or self.is_dashing:
-            out("Dash blocked by cooldown or already dashing", 2)
-            return
-                
-        # Normalize direction
-        magnitude = math.sqrt(direction_x * direction_x + direction_y * direction_y)
-        if magnitude < 0.2:  # Don't dash if stick barely moved
-            out("Dash blocked by small stick movement", 2)
-            return
-                
-        direction_x /= magnitude
-        direction_y /= magnitude
-        
-        # Store start position
-        self.dash_start_pos = [self.player_pos[0], self.player_pos[1]]
-        
-        # Calculate dash end position
-        target_x = self.player_pos[0] + direction_x * self.dash_distance
-        target_y = self.player_pos[1] + direction_y * self.dash_distance
-        
-        # Clamp to screen bounds
-        target_x = max(-self.aspect_ratio + 0.05, min(self.aspect_ratio - 0.05, target_x))
-        target_y = max(-0.95, min(0.95, target_y))
-        
-        self.dash_target_pos = [target_x, target_y]
-        
-        out(f"Dash executing - from: ({self.dash_start_pos[0]}, {self.dash_start_pos[1]}) to: ({target_x}, {target_y})", 2)
-        
-        # Start dash
-        self.is_dashing = True
-        self.dash_start_time = current_time
-        self.last_dash_time = current_time
-
-        # Create initial visual effects
-        if not self.dash_arc:
-            self.create_dash_visuals()
-        
-        # Calculate angle for the arc
-        angle = math.atan2(direction_y, direction_x)
-        self.dash_arc.setR(-math.degrees(angle) - 45)  # -45 to align the quarter circle
-        self.dash_arc.setPos(self.player_pos[0], 0, self.player_pos[1])
-        self.dash_arc.show()
-        
-        self.dash_glow.setPos(self.player_pos[0], 0, self.player_pos[1])
-        self.dash_glow.show()
-
-    def update_dash(self, task):
-        if not self.is_dashing:
-            return
-                
-        current_time = time.time()
-        progress = (current_time - self.dash_start_time) / self.dash_duration
-        
-        if progress >= 1.0:
-            # Dash complete
-            self.is_dashing = False
-            self.player_pos[0] = self.dash_target_pos[0]
-            self.player_pos[1] = self.dash_target_pos[1]
-            self.player.setPos(self.dash_target_pos[0], 0, self.dash_target_pos[1])
-
-            # Start invincibility
-            self.is_invincible = True
-            self.invincibility_start_time = current_time
-            
-            # Clean up visual effects
-            self.dash_arc.hide()
-            self.dash_glow.hide()
-            
-            # Clean up trail particles
-            for particle in self.dash_trail_particles[:]:
-                particle['node'].removeNode()
-            self.dash_trail_particles.clear()
-            
-            return
-        
-        # Update dash visuals
-        t = 1 - (1 - progress) * (1 - progress)  # Quadratic ease-out
-        
-        # Update player position
-        new_x = self.dash_start_pos[0] + (self.dash_target_pos[0] - self.dash_start_pos[0]) * t
-        new_y = self.dash_start_pos[1] + (self.dash_target_pos[1] - self.dash_start_pos[1]) * t
-        
-        # Create trail particles
-        if len(self.dash_trail_particles) < self.max_trail_particles:
-            particle = self.create_trail_particle()
-            particle.setPos(self.player_pos[0], 0, self.player_pos[1])
-            self.dash_trail_particles.append({
-                'node': particle,
-                'spawn_time': current_time,
-                'position': (self.player_pos[0], self.player_pos[1])
-            })
-        
-        # Update existing trail particles
-        for particle in self.dash_trail_particles[:]:
-            age = current_time - particle['spawn_time']
-            if age > self.trail_lifetime:
-                particle['node'].removeNode()
-                self.dash_trail_particles.remove(particle)
-            else:
-                # Fade out particle
-                fade = 1.0 - (age / self.trail_lifetime)
-                particle['node'].setColorScale(1, 1, 1, fade)
-        
-        # Update arc and glow
-        self.dash_arc.setPos(new_x, 0, new_y)
-        self.dash_glow.setPos(new_x, 0, new_y)
-        
-        # Fade arc and glow based on progress
-        fade = 1.0 - progress
-        self.dash_arc.setColorScale(1, 1, 1, fade)
-        self.dash_glow.setColorScale(1, 1, 1, fade * 0.7)
-        
-        # Update player position
-        self.player_pos[0] = new_x
-        self.player_pos[1] = new_y
-        self.player.setPos(new_x, 0, new_y)
-
-        # Check for enemy collisions - this is the important addition
-        self.check_dash_collision()
-
-    def check_dash_collision(self):
-        if not self.is_dashing:
-            return
-                
-        dash_vector_x = self.dash_target_pos[0] - self.dash_start_pos[0]
-        dash_vector_y = self.dash_target_pos[1] - self.dash_start_pos[1]
-        
-        # Define AoE radius (5% of screen width)
-        aoe_radius = self.aspect_ratio * 0.20
-        
-        # Check each enemy for intersection with dash path or destination AoE
-        for enemy in self.enemies[:]:
-            enemy_pos = enemy.getPos()
-            
-            # First check dash destination AoE
-            dist_to_destination = math.sqrt(
-                (enemy_pos[0] - self.dash_target_pos[0])**2 + 
-                (enemy_pos[2] - self.dash_target_pos[1])**2
-            )
-            
-            # If enemy is within AoE radius of destination or along dash path, destroy it
-            if dist_to_destination <= aoe_radius:
-                # Create a bigger explosion for AoE kills
-                self.create_explosion(enemy_pos[0], enemy_pos[2], is_aoe=True)
-                self.score += 1
-                self.score_text.setText(f"Score: {self.score}")
-                self.check_difficulty_increase()
-                self.enemy_data.pop(enemy)
-                enemy.removeNode()
-                self.enemies.remove(enemy)
-                self.enemy_death_sound.play()
-                if len(self.enemies) < self.enemy_limit:
-                    self.spawn_single_enemy()
-                continue
-            
-            # Then check dash path collision as before
-            px = enemy_pos[0] - self.dash_start_pos[0]
-            py = enemy_pos[2] - self.dash_start_pos[1]
-            
-            dash_length_squared = dash_vector_x * dash_vector_x + dash_vector_y * dash_vector_y
-            if dash_length_squared == 0:
-                continue
-                
-            t = max(0, min(1, (px * dash_vector_x + py * dash_vector_y) / dash_length_squared))
-            
-            closest_x = self.dash_start_pos[0] + t * dash_vector_x
-            closest_y = self.dash_start_pos[1] + t * dash_vector_y
-            
-            dist = math.sqrt((enemy_pos[0] - closest_x)**2 + (enemy_pos[2] - closest_y)**2)
-            if dist < 0.1:  # Regular dash collision threshold
-                self.create_explosion(enemy_pos[0], enemy_pos[2])
-                self.score += 1
-                self.score_text.setText(f"Score: {self.score}")
-                self.check_difficulty_increase()
-                self.enemy_data.pop(enemy)
-                enemy.removeNode()
-                self.enemies.remove(enemy)
-                self.enemy_death_sound.play()
-                if len(self.enemies) < self.enemy_limit:
-                    self.spawn_single_enemy()
-
-
-        if self.boss:
-            dash_vector_x = self.dash_target_pos[0] - self.dash_start_pos[0]
-            dash_vector_y = self.dash_target_pos[1] - self.dash_start_pos[1]
-            boss_pos = self.boss.getPos()
-            
-            # Check dash destination AoE
-            dist_to_destination = math.sqrt(
-                (boss_pos[0] - self.dash_target_pos[0])**2 + 
-                (boss_pos[2] - self.dash_target_pos[1])**2
-            )
-            
-            aoe_radius = self.aspect_ratio * 0.20
-            if dist_to_destination <= aoe_radius:
-                self.boss_health -= 1
-                self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
-                if self.boss_health <= 0:
-
-                    current_time = time.time()
-                    out(f"[{current_time:.3f}] Boss health reached 0, starting death sequence", 3)
-                    boss_pos = self.boss.getPos()
-                    out(f"[{current_time:.3f}] Boss final position: ({boss_pos[0]:.2f}, {boss_pos[2]:.2f})", 3)
-                    self.start_boss_death_sequence((boss_pos[0], boss_pos[2]))
-                    self.create_explosion(boss_pos[0], boss_pos[2], is_aoe=True)
-                    out(f"[{current_time:.3f}] Created initial boss death explosion", 3)
-                    self.score += 10
-                    self.score_text.setText(f"Score: {self.score}")
-                    self.boss.removeNode()
-                    self.boss = None
-                    self.enemy_death_sound.play()
-
-                    # Wait until death sequence is complete to proceed
-                    taskMgr.doMethodLater(self.boss_death_duration, self.complete_boss_death, 'complete_boss_death')
-
-    def debug_button(self):
-        out("Shoulder button pressed!", 2)
-        if self.gamepad:
-            right_x = self.gamepad.findAxis(InputDevice.Axis.left_x).value
-            right_y = self.gamepad.findAxis(InputDevice.Axis.left_y).value
-            out(f"Left stick position: {right_x}, {right_y}", 2)
-            self.perform_dash(right_x, right_y)
-
-    def create_dash_visuals(self):
-        # Increase arc size
-        arc_size = 0.15  # Increased from 0.1
-        cm = CardMaker("dash_arc")
-        cm.setFrame(-arc_size, arc_size, -arc_size, arc_size)
-        self.dash_arc = self.render2d.attachNewNode(cm.generate())
-        
-        # Create arc texture with stronger glow
-        texture_size = 128
-        arc_image = PNMImage(texture_size, texture_size, 4)
-        center_x = texture_size // 2
-        center_y = texture_size // 2
-        radius = texture_size // 2
-        
-        # Draw 1/4 circle arc with stronger glow
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                angle = math.atan2(dy, dx)
-                
-                if distance <= radius and 0 <= angle <= math.pi/2:
-                    intensity = 1.0 - (distance / radius)
-                    intensity = intensity ** 0.3  # Less falloff for stronger glow
-                    
-                    # Brighter core with blue tint
-                    arc_image.setXel(x, y, 0.9, 0.95, 1.0)
-                    arc_image.setAlpha(x, y, intensity)
-                else:
-                    arc_image.setAlpha(x, y, 0)
-
-        arc_texture = Texture()
-        arc_texture.load(arc_image)
-        self.dash_arc.setTexture(arc_texture)
-        self.dash_arc.setTransparency(TransparencyAttrib.MAlpha)
-        self.dash_arc.setBin('fixed', 100)
-        self.dash_arc.hide()
-
-        # Create larger dash glow effect
-        glow_size = 0.2  # Increased from 0.15
-        cm = CardMaker("dash_glow")
-        cm.setFrame(-glow_size, glow_size, -glow_size, glow_size)
-        self.dash_glow = self.render2d.attachNewNode(cm.generate())
-        
-        # Create brighter glow texture
-        glow_image = PNMImage(texture_size, texture_size, 4)
-        
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                
-                if distance <= radius:
-                    intensity = 1.0 - (distance / radius)
-                    intensity = intensity ** 1.5  # Adjusted for better falloff
-                    
-                    # Brighter blue tint
-                    glow_image.setXel(x, y, 0.8, 0.9, 1.0)
-                    glow_image.setAlpha(x, y, intensity * 0.9)  # More opacity
-                else:
-                    glow_image.setAlpha(x, y, 0)
-        
-        glow_texture = Texture()
-        glow_texture.load(glow_image)
-        self.dash_glow.setTexture(glow_texture)
-        self.dash_glow.setTransparency(TransparencyAttrib.MAlpha)
-        self.dash_glow.setBin('fixed', 99)
-        self.dash_glow.hide()
-
-    def create_trail_particle(self):
-        particle_size = 0.04  # Increased from 0.03
-        cm = CardMaker("trail_particle")
-        cm.setFrame(-particle_size, particle_size, -particle_size, particle_size)
-        particle = self.render2d.attachNewNode(cm.generate())
-        
-        texture_size = 64
-        particle_image = PNMImage(texture_size, texture_size, 4)
-        center_x = texture_size // 2
-        center_y = texture_size // 2
-        radius = texture_size // 2
-        
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                
-                if distance <= radius:
-                    intensity = 1.0 - (distance / radius)
-                    intensity = intensity ** 0.5  # Less falloff for stronger particles
-                    
-                    # Brighter blue color
-                    particle_image.setXel(x, y, 0.7, 0.85, 1.0)
-                    particle_image.setAlpha(x, y, intensity * 0.8)  # More opacity
-                else:
-                    particle_image.setAlpha(x, y, 0)
-        
-        particle_texture = Texture()
-        particle_texture.load(particle_image)
-        particle.setTexture(particle_texture)
-        particle.setTransparency(TransparencyAttrib.MAlpha)
-        particle.setBin('fixed', 98)
-        
-        return particle
-
-    def create_dash_indicator(self):
-        # Create the indicator
-        indicator_size = 0.015  # Small size for the indicator
-        cm = CardMaker("dash_indicator")
-        cm.setFrame(-indicator_size, indicator_size, -indicator_size, indicator_size)
-        self.dash_indicator = self.render2d.attachNewNode(cm.generate())
-        
-        # Create a glowing red circle texture
-        texture_size = 64
-        indicator_image = PNMImage(texture_size, texture_size, 4)
-        center_x = texture_size // 2
-        center_y = texture_size // 2
-        radius = texture_size // 2
-        
-        for x in range(texture_size):
-            for y in range(texture_size):
-                dx = x - center_x
-                dy = y - center_y
-                distance = math.sqrt(dx*dx + dy*dy)
-                
-                if distance <= radius:
-                    intensity = 1.0 - (distance / radius)
-                    intensity = intensity ** 0.5  # Softer falloff
-                    
-                    # Bright red core with white center
-                    if distance < radius * 0.3:
-                        indicator_image.setXel(x, y, 1.0, 0.3, 0.3)  # Light red
-                    else:
-                        indicator_image.setXel(x, y, 1.0, 0.0, 0.0)  # Pure red
-                    indicator_image.setAlpha(x, y, intensity)
-                else:
-                    indicator_image.setAlpha(x, y, 0)
-        
-        indicator_texture = Texture()
-        indicator_texture.load(indicator_image)
-        self.dash_indicator.setTexture(indicator_texture)
-        self.dash_indicator.setTransparency(TransparencyAttrib.MAlpha)
-        self.dash_indicator.setBin('fixed', 101)  # Render on top of player
-        
-        # Start the pulsing animation
-        taskMgr.add(self.update_dash_indicator, "updateDashIndicator")
-
-    def update_dash_indicator(self, task):
-        if self.paused or self.game_over:
-            self.dash_indicator.hide()
-            return task.cont
-            
-        current_time = time.time()
-        cooldown_remaining = current_time - self.last_dash_time
-        
-        # Add this to track when dash becomes available
-        if not hasattr(self, '_dash_was_ready'):
-            self._dash_was_ready = False
-        
-        # Show/hide based on cooldown
-        is_dash_ready = cooldown_remaining >= self.dash_cooldown
-        
-        # Play sound when dash first becomes available
-        if is_dash_ready and not self._dash_was_ready:
-            if hasattr(self, 'dash_ready_sound') and self.dash_ready_sound:
-                out("playing powerup", 3)
-                self.dash_ready_sound.play()
-        
-        # Update dash ready state
-        self._dash_was_ready = is_dash_ready
-        
-        if is_dash_ready:
-            self.dash_indicator.show()
-            
-            # Pulsing animation
-            pulse_speed = 3.0  # Adjust for faster/slower pulse
-            pulse_magnitude = 0.3  # Adjust for larger/smaller pulse
-            base_scale = 1.0
-            
-            # Calculate scale based on sine wave
-            pulse = math.sin(task.time * pulse_speed) * pulse_magnitude
-            new_scale = base_scale + pulse
-            
-            # Update position and scale
-            self.dash_indicator.setPos(self.player_pos[0], 0, self.player_pos[1])
-            self.dash_indicator.setScale(new_scale)
-            
-            # Pulse opacity as well
-            alpha = 0.7 + (math.sin(task.time * pulse_speed) * 0.3)
-            self.dash_indicator.setColorScale(1, 1, 1, alpha)
-        else:
-            self.dash_indicator.hide()
-        
-        return task.cont
-
-
-    def spawn_boss(self):
-        # Choose a random side to spawn from
-        side = random.choice(['top', 'bottom', 'left', 'right'])
-        boss_size = 0.3  # 3x regular enemy size
-        buffer = 0.1
-
-        # Calculate spawn position based on side
-        if side == 'top':
-            x = random.uniform(-self.aspect_ratio + boss_size, self.aspect_ratio - boss_size)
-            y = 1 + buffer
-        elif side == 'bottom':
-            x = random.uniform(-self.aspect_ratio + boss_size, self.aspect_ratio - boss_size)
-            y = -1 - buffer
-        elif side == 'left':
-            x = -self.aspect_ratio - buffer
-            y = random.uniform(-1 + boss_size, 1 - boss_size)
-        else:  # right
-            x = self.aspect_ratio + buffer
-            y = random.uniform(-1 + boss_size, 1 - boss_size)
-
-        # Create the boss
-        cm = CardMaker("boss")
-        cm.setFrame(-boss_size, boss_size, -boss_size, boss_size)
-        self.boss = self.render2d.attachNewNode(cm.generate())
-        boss_tex = self.loader.loadTexture(get_resource_path("boss1.png"))
-        self.boss.setTexture(boss_tex)
-        self.boss.setTransparency(TransparencyAttrib.MAlpha)
-        self.boss.setPos(x, 0, y)
-        self.boss_health = self.boss_hits_required
-
-    def update_boss(self):
-        if not self.boss:
-            return
-
-        current_time = time.time()
-        boss_pos = self.boss.getPos()
-        player_pos = (self.player_pos[0], self.player_pos[1])
-        
-        # Calculate direction to player
-        dx = player_pos[0] - boss_pos[0]
-        dy = player_pos[1] - boss_pos[2]
-        
-        distance = math.sqrt(dx * dx + dy * dy)
-        if distance > 0:
-            dx /= distance
-            dy /= distance
-        
-        # Fire projectile if enough time has passed
-        if current_time - self.boss_last_fire_time >= self.boss_fire_rate:
-            self.create_boss_projectile(boss_pos[0], boss_pos[2], dx, dy)
-            self.boss_last_fire_time = current_time
-        
-        # Rest of existing boss movement code...
-        seconds_elapsed = time.time() - self.game_start_time
-        current_max = self.speed_base_max + (self.speed_max_increase_rate * seconds_elapsed)
-        boss_speed = current_max * self.boss_speed_multiplier
-        
-        # Update position
-        new_x = boss_pos[0] + dx * boss_speed
-        new_y = boss_pos[2] + dy * boss_speed
-        
-        # Clamp to screen bounds
-        new_x = max(min(new_x, self.aspect_ratio - 0.3), -self.aspect_ratio + 0.3)
-        new_y = max(min(new_y, 0.95), -0.95)
-        
-        self.boss.setPos(new_x, 0, new_y)
-        
-        # Check collision with player if not invincible
-        if (not self.is_invincible and
-            abs(self.player_pos[0] - new_x) < 0.3 and 
-            abs(self.player_pos[1] - new_y) < 0.3):
-            self.game_over = True
-            self.game_over_text.show()
-            self.paused = True
-            if hasattr(self, 'music') and self.music:
-                self.music.stop()
-
-    def create_boss_projectile(self, x, y, direction_x, direction_y):
-        cm = CardMaker("boss_projectile")
-        projectile_size = 0.06  # 3x normal projectile size
-        cm.setFrame(-projectile_size, projectile_size, -projectile_size, projectile_size)
-        projectile = self.render2d.attachNewNode(cm.generate())
-        
-        projectile_tex = self.loader.loadTexture(get_resource_path("orb.png"))
-        projectile.setTexture(projectile_tex)
-        projectile.setTransparency(TransparencyAttrib.MAlpha)
-        
-        projectile.setPos(x, 0, y)
-        projectile.setPythonTag("direction", (direction_x, direction_y))
-        self.boss_projectiles.append(projectile)
-
-    def create_white_overlay(self):
-        cm = CardMaker("white_overlay")
-        cm.setFrame(-2, 2, -2, 2)  # Make it larger than screen
-        overlay = self.render2d.attachNewNode(cm.generate())
-        overlay.setColor(1, 1, 1, 0)  # Start fully transparent
-        overlay.setBin('fixed', 200)  # Ensure it's on top
-        return overlay
-
-    def start_boss_death_sequence(self, boss_pos):
-        self.boss_death_sequence = True
-        self.update_sequence_count = 0
-        self.last_boss_break = 0
-        self.boss_final_pos = boss_pos
-        
-        # Create white overlay
-        cm = CardMaker("white_overlay")
-        cm.setFrame(-2, 2, -2, 2)
-        self.white_overlay = self.render2d.attachNewNode(cm.generate())
-        self.white_overlay.setColor(1, 1, 1, 0)
-        self.white_overlay.setBin('fixed', 1000)
-        self.white_overlay.setDepthTest(False)
-        self.white_overlay.setDepthWrite(False)
-        self.white_overlay.setTransparency(TransparencyAttrib.MAlpha)
-        
-        # Add the update task
-        taskMgr.add(self.update_boss_death_sequence, "boss_death_sequence")
-
-    def update_boss_death_sequence(self, task):
-        if not self.boss_death_sequence:
-            return task.cont
-                
-        self.update_sequence_count += 1
-        total_frames = (self.boss_death_duration + self.white_fade_duration + 
-                    self.white_screen_duration + self.fade_duration)
-        
-        if self.update_sequence_count > self.last_boss_break:
-            out("one second has passed (or this is the first sequence update)", 3)
-            self.last_boss_break += 60
-        
-        out(f"Frame {self.update_sequence_count} / {total_frames}", 3)
-        out(f"Current phase:", 3)
-        
-        # Handle boss death animation during explosion phase
-        if self.boss and self.update_sequence_count <= self.boss_death_duration:
-            # Calculate progress through the death animation
-            progress = self.update_sequence_count / self.boss_death_duration
-            
-            # Shake effect with decreasing intensity as boss grows
-            shake_intensity = self.boss_death_shake_intensity * (1 - progress)
-            shake_x = random.uniform(-shake_intensity, shake_intensity)
-            self.boss.setPos(
-                self.boss_final_pos[0] + shake_x,
-                0,
-                self.boss_final_pos[1]
-            )
-            
-            # Scale effect up to 1.5 (50% bigger)
-            scale_factor = self.boss_death_scale_start + (
-                (1.5 - self.boss_death_scale_start) * progress
-            )
-            self.boss.setScale(scale_factor)
-            
-            # If we're at the end of the explosion phase, create final explosion and remove boss
-            if self.update_sequence_count == self.boss_death_duration - 60:
-                final_pos = self.boss.getPos()
-                # Get the boss's final scale and create an appropriately sized explosion
-                final_scale = self.boss.getScale()[0]  # Get X scale component
-                explosion_size = 0.3 * final_scale * 3  # Make explosion slightly larger than boss
-                
-                # Create custom large explosion
-                cm = CardMaker("final_explosion")
-                cm.setFrame(-explosion_size, explosion_size, -explosion_size, explosion_size)
-                explosion = self.render2d.attachNewNode(cm.generate())
-                
-                texture_size = 256  # Larger texture for better quality
-                image = PNMImage(texture_size, texture_size, 4)
-                center_x = texture_size // 2
-                center_y = texture_size // 2
-                radius = texture_size // 2
-                
-                # Create a more intense explosion texture
-                for x in range(texture_size):
-                    for y in range(texture_size):
-                        dx = x - center_x
-                        dy = y - center_y
-                        distance = math.sqrt(dx*dx + dy*dy)
-                        if distance <= radius:
-                            intensity = 1.0 - (distance / radius)
-                            intensity = intensity ** 0.5  # Less falloff for stronger glow
-                            
-                            if distance < radius * 0.3:
-                                # Bright white-red core
-                                image.setXel(x, y, 1.0, 0.9, 0.9)
-                            elif distance < radius * 0.6:
-                                # Bright red-white middle with blue tint
-                                image.setXel(x, y, 1.0, 0.7, 0.9)
-                            else:
-                                # Red-blue outer
-                                image.setXel(x, y, 0.8, 0.4, 1.0)
-                            
-                            image.setAlpha(x, y, intensity)
-                        else:
-                            image.setAlpha(x, y, 0)
-                
-                texture = Texture()
-                texture.load(image)
-                explosion.setTexture(texture)
-                explosion.setTransparency(TransparencyAttrib.MAlpha)
-                explosion.setBin('fixed', 100)
-                explosion.setPos(final_pos[0], 0, final_pos[2])
-                
-                # Add to explosion tracking with longer duration
-                self.explosion_data[explosion] = {
-                    'start_time': globalClock.getFrameTime(),
-                    'pos_x': final_pos[0],
-                    'pos_y': final_pos[2],
-                    'rotation_speed': random.uniform(-60, 60),  # Slower rotation
-                    'initial_rotation': random.uniform(0, 360),
-                    'is_aoe': True,
-                    'duration': 2.0,  # Make this explosion last 3 seconds
-                    'start_scale': 0.3,  # Start at regular size
-                    'end_scale': 2.0    # End at 2x size
-                }
-                self.explosions.append(explosion)
-
-                
-                
-        
-        # Track current phase
-        if self.update_sequence_count <= self.boss_death_duration:
-            out(f"  Explosion phase (Frame {self.update_sequence_count} / {self.boss_death_duration})", 3)
-            self.white_overlay.setColor(1, 1, 1, 0)
-            out(f"White overlay opacity: 0.0", 3)
-            
-        elif self.update_sequence_count <= self.boss_death_duration + self.white_fade_duration:
-            fade_frames = self.update_sequence_count - self.boss_death_duration
-            opacity = fade_frames / self.white_fade_duration
-            opacity = min(1.0, opacity)
-            out(f"  White fade phase (Frame {fade_frames} / {self.white_fade_duration})", 3)
-            out(f"White overlay opacity: {opacity:.3f}", 3)
-            self.white_overlay.setColor(1, 1, 1, opacity)
-            
-        elif self.update_sequence_count <= self.boss_death_duration + self.white_fade_duration + self.white_screen_duration:
-            out(f"  White screen phase", 3)
-            self.white_overlay.setColor(1, 1, 1, 1)
-            out(f"White overlay opacity: 1.0", 3)
-            
-            # Start loading town when we first enter the white screen phase
-            if self.update_sequence_count == self.boss_death_duration + self.white_fade_duration + 1:
-                out("Screen is fully white, loading town", 3)
-                self.transition_to_town()
-            
-        else:
-            fade_out_frames = self.update_sequence_count - (self.boss_death_duration + self.white_fade_duration + self.white_screen_duration)
-            opacity = 1.0 - (fade_out_frames / self.fade_duration)
-            opacity = max(0.0, opacity)
-            out(f"  Final fade phase", 3)
-            out(f"White overlay opacity: {opacity:.3f}", 3)
-            self.white_overlay.setColor(1, 1, 1, opacity)
-
-        # Handle explosions and screen shake
-        if self.update_sequence_count <= self.boss_death_duration + self.white_fade_duration:
-            self.update_explosions(task)
-            
-            shake_x = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
-            shake_y = random.uniform(-self.screen_shake_intensity, self.screen_shake_intensity)
-            self.camera.setPos(shake_x, 0, shake_y)
-            
-            if random.random() < 0.5:
-                x = random.uniform(-self.aspect_ratio, self.aspect_ratio)
-                y = random.uniform(-1, 1)
-                #self.create_explosion(x, y, is_aoe=True)
-            
-            if random.random() < 0.7:
-                offset_x = random.uniform(-0.5, 0.5)
-                offset_y = random.uniform(-0.5, 0.5)
-                '''self.create_explosion(
-                    self.boss_final_pos[0] + offset_x,
-                    self.boss_final_pos[1] + offset_y,
-                    is_aoe=True
-                )'''
-
-        # Remove boss just before explosion ends (about 10 frames before)
-        if self.update_sequence_count == self.boss_death_duration - 20:
-            self.boss.removeNode()
-            self.boss = None
-
-        if self.update_sequence_count > total_frames:
-            out(f"Death sequence complete", 3)
-            self.boss_death_sequence = False
-            if self.white_overlay:
-                self.white_overlay.removeNode()
-            return task.done
-
-        return task.cont
-
-    def complete_boss_death(self, task):
-        # Reset camera position
-        self.camera.setPos(0, 0, 0)
-        
-        # Increment level and increase base difficulties by 10%
-        self.level += 1
-        self.base_speed_min *= 1.1
-        self.base_speed_max *= 1.1
-        self.base_num_enemies = max(int(self.base_num_enemies * 1.1), self.base_num_enemies + 1)
-        
-        # Reset current values to new base values
-        self.speed_min = self.base_speed_min
-        self.speed_max = self.base_speed_max
-        self.num_enemies = self.base_num_enemies
-        
-        # Reset speed increase over time
-        self.game_start_time = time.time()
-        self.speed_base_max = self.speed_max
-        
-        # Reset game time tracking for next boss
-        self.last_time_update = time.time()
-        
-        # Increase boss spawn time
-        self.boss_spawn_time += self.boss_spawn_time_base
-        
-        return Task.done
-
     def transition_to_town(self):
-        """Handle the transition to town area"""
-        from core.town import TownArea  # Update the import path
-        
-        # Clear ALL combat-related entities
-        for enemy in self.enemies[:]:
-            enemy.removeNode()
-        self.enemies.clear()
-        self.enemy_data.clear()
-        
-        for projectile in self.projectiles[:]:
-            projectile.removeNode()
-        self.projectiles.clear()
-        
-        for projectile in self.boss_projectiles[:]:
-            projectile.removeNode()
-        self.boss_projectiles.clear()
-        
-        # Make absolutely sure boss is gone
-        if self.boss:
-            self.boss.removeNode()
-        self.boss = None
-        self.boss_health = 0
-        
-        # Reset boss spawn timer to prevent immediate respawn
-        self.actual_game_time = 0
-        self.last_time_update = time.time()
+        """Handle transition to town area"""
+        # Clear combat entities
+        self.enemy_system.cleanup()
+        self.boss_system.cleanup()
+        self.projectile_system.cleanup()
+        self.orb_system.cleanup()
         
         # Hide combat background
         self.background_node.hide()
         
-        # Initialize and show town area if needed
+        # Initialize and show town area
         if not self.town_area:
             self.town_area = TownArea(self)
         self.town_area.enter()
         
         # Reset camera
         self.camera.setPos(0, 0, 0)
+
+    def cleanup(self):
+        """Clean up game resources"""
+        self.player_system.cleanup()
+        self.enemy_system.cleanup()
+        self.boss_system.cleanup()
+        self.projectile_system.cleanup()
+        self.orb_system.cleanup()
+        self.effects_system.cleanup()
+        self.ui_system.cleanup()
+        
+        if self.town_area:
+            self.town_area.exit()
